@@ -5,7 +5,9 @@ from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority
 from layout import Element, DocumentLayout, paint_tree, Rect, get_font
 from draw import DrawLine, DrawOutline, DrawRect, DrawText
 from network import URL
+from js import JSContext
 import urllib.parse
+import dukpy
 
 class Browser:
   def __init__(self):
@@ -121,6 +123,21 @@ class Tab:
     body = url.request(payload)
     self.nodes = HTMLParser(body).parse()
     
+    self.js = JSContext(self)
+    scripts = [node.attributes["src"]
+               for node in tree_to_list(self.nodes, [])
+               if isinstance(node, Element)
+               and node.tag == "script"
+               and "src" in node.attributes]
+    
+    for script in scripts:
+      script_url = url.resolve(script)
+      try:
+        body = script_url.request()
+      except:
+        continue
+      self.js.run(script_url, body)
+
     self.rules = DEFAULT_STYLE_SHEET.copy()
     links = [node.attributes["href"]
              for node in tree_to_list(self.nodes, [])
@@ -128,7 +145,6 @@ class Tab:
              and node.tag == "link"
              and node.attributes.get("rel") == "stylesheet"
              and "href" in node.attributes]
-    
     for link in links:
       try:
         body = url.resolve(link).request()
@@ -184,14 +200,17 @@ class Tab:
       if isinstance(elt, Text):
         pass
       elif elt.tag == "a" and "href" in elt.attributes:
+        if self.js.dispatch_event("click", elt): return
         url = self.url.resolve(elt.attributes["href"])
         return self.load(url)
       elif elt.tag == "input":
+        if self.js.dispatch_event("click", elt): return
         elt.attributes["value"] = ""
         self.focus = elt
         elt.is_focused = True
         return self.render()
       elif elt.tag == "button":
+        if self.js.dispatch_event("click", elt): return
         while elt:
           if elt.tag == "form" and "action" in elt.attributes:
             return self.submit_form(elt)
@@ -199,6 +218,7 @@ class Tab:
     self.render()
 
   def submit_form(self, elt):
+    if self.js.dispatch_event("submit", elt): return
     inputs = [node for node in tree_to_list(elt, [])
               if isinstance(node, Element)
               and node.tag == "input"
@@ -217,6 +237,7 @@ class Tab:
   
   def keypress(self, char):
     if self.focus:
+      if self.js.dispatch_event("keydown", self.focus): return
       self.focus.attributes["value"] += char
       self.render()
 

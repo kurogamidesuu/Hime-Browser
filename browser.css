@@ -19,3 +19,5 @@ button {
   font-size: 16px; font-weight: normal; font-style: normal;
   background-color: orange;
 }
+
+strong { font-weight: bold; color: red; }
