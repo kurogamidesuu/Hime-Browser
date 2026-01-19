@@ -117,10 +117,19 @@ class Tab:
       self.load(back)
 
   def load(self, url, payload=None):
+    headers, body = url.request(self.url, payload)
     self.scroll = 0
     self.url = url
     self.history.append(url)
-    body = url.request(payload)
+
+    self.allowed_origins = None
+    if "content-security-policy" in headers:
+      csp = headers["content-security-policy"].split()
+      if len(csp) > 0 and csp[0] == "default-src":
+        self.allowed_origins = []
+        for origin in csp[1:]:
+          self.allowed_origins.append(URL(origin).origin())
+
     self.nodes = HTMLParser(body).parse()
     
     self.js = JSContext(self)
@@ -132,8 +141,12 @@ class Tab:
     
     for script in scripts:
       script_url = url.resolve(script)
+      if not self.allowed_request(script_url):
+        print("Blocked script", script, "due to CSP")
+        continue
+
       try:
-        body = script_url.request()
+        header, body = script_url.request(url)
       except:
         continue
       self.js.run(script_url, body)
@@ -146,12 +159,20 @@ class Tab:
              and node.attributes.get("rel") == "stylesheet"
              and "href" in node.attributes]
     for link in links:
+      style_url = url.resolve(link)
+      if not self.allowed_request(style_url):
+        print("Blocked style", link, "due to CSP")
+        continue
+
       try:
-        body = url.resolve(link).request()
+        header, body = style_url.request(url)
       except:
         continue
       self.rules.extend(CSSParser(body).parse())
     self.render()
+
+  def allowed_request(self, url):
+    return self.allowed_origins == None or url.origin() in self.allowed_origins
 
   def render(self):
     style(self.nodes, sorted(self.rules, key=cascade_priority))
@@ -206,15 +227,18 @@ class Tab:
       elif elt.tag == "input":
         if self.js.dispatch_event("click", elt): return
         elt.attributes["value"] = ""
+        if self.focus:
+          self.focus.is_focused = False
         self.focus = elt
         elt.is_focused = True
         return self.render()
       elif elt.tag == "button":
         if self.js.dispatch_event("click", elt): return
-        while elt:
+        while elt.parent:
           if elt.tag == "form" and "action" in elt.attributes:
             return self.submit_form(elt)
           elt = elt.parent
+      elt = elt.parent
     self.render()
 
   def submit_form(self, elt):
