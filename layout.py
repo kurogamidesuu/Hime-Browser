@@ -1,13 +1,34 @@
+import skia
 from constants import HEIGHT, WIDTH, BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX
 from dom import Text, Element
-from draw import get_font, Rect, DrawRect, DrawText, DrawLine
+from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Opacity, Blend
 
 def paint_tree(layout_object, display_list):
+  cmds = []
   if layout_object.should_paint():
-    display_list.extend(layout_object.paint())
-
+    cmds = layout_object.paint()
   for child in layout_object.children:
-    paint_tree(child, display_list)
+    paint_tree(child, cmds)
+
+  if layout_object.should_paint():
+    cmds = layout_object.paint_effects(cmds)
+  display_list.extend(cmds)
+
+def paint_visual_effects(node, cmds, rect):
+  opacity = float(node.style.get("opacity", "1.0"))
+  blend_mode = node.style.get("mix-blend-mode")
+
+  if node.style.get("overflow", "visible") == "clip":
+    if not blend_mode:
+      blend_mode = "source-over"
+    border_radius = float(node.style.get(
+      "border-radius", "0px"
+    )[:-2])
+    cmds.append(Blend(1.0, "destination-in", [
+      DrawRRect(rect, border_radius, "white")
+    ]))
+
+  return [Blend(opacity, blend_mode, cmds)]
 
 class DocumentLayout:
   def __init__(self, node, h=HEIGHT, w=WIDTH):
@@ -35,6 +56,9 @@ class DocumentLayout:
   
   def should_paint(self):
     return True
+  
+  def paint_effects(self, cmds):
+    return cmds
 
 class BlockLayout:
   def __init__(self, node, parent, previous, h=HEIGHT, w=WIDTH):
@@ -136,11 +160,10 @@ class BlockLayout:
   def word(self, node, word):
     weight = node.style["font-weight"]
     style = node.style["font-style"]
-    if style == "normal": style = "roman"
     size = int(float(node.style["font-size"][:-2]) * .75)
     font = get_font(size, weight, style)
 
-    word_width = font.measure(word)
+    word_width = font.measureText(word)
     if self.cursor_x + word_width > self.width:
       self.new_line()
     
@@ -148,7 +171,7 @@ class BlockLayout:
     previous_word = line.children[-1] if line.children else None
     text = TextLayout(node, word, line, previous_word)
     line.children.append(text)
-    self.cursor_x += word_width + font.measure(" ")
+    self.cursor_x += word_width + font.measureText(" ")
   
   def new_line(self):
     self.cursor_x = 0
@@ -157,15 +180,21 @@ class BlockLayout:
     self.children.append(new_line)
   
   def self_rect(self):
-    return Rect(self.x, self.y, self.x + self.width, self.y + self.height)
+    return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)
 
   def paint(self):
     cmds = []
     bgcolor = self.node.style.get("background-color", "transparent")
 
     if bgcolor != "transparent":
-      rect = DrawRect(self.self_rect(), bgcolor)
-      cmds.append(rect)
+      radius = float(
+        self.node.style.get(
+          "border-radius", "0px"
+        )[:-2]
+      )
+      cmds.append(DrawRRect(
+        self.self_rect(), radius, bgcolor
+      ))
     return cmds
   
   def input(self, node):
@@ -179,14 +208,19 @@ class BlockLayout:
 
     weight = node.style["font-weight"]
     style = node.style["font-style"]
-    if style == "normal": style = "roman"
     size = int(float(node.style["font-size"][:-2]) * .75)
     font = get_font(size, weight, style)
 
-    self.cursor_x += w + font.measure(" ")
+    self.cursor_x += w + font.measureText(" ")
 
   def should_paint(self):
     return isinstance(self.node, Text) or (self.node.tag != "input" and self.node.tag != "button")
+  
+  def paint_effects(self, cmds):
+    cmds = paint_visual_effects(
+      self.node, cmds, self.self_rect()
+    )
+    return cmds
 
 class LineLayout:
   def __init__(self, node, parent, previous):
@@ -215,12 +249,12 @@ class LineLayout:
       self.height = 0
       return
     
-    max_ascent = max([word.font.metrics("ascent")
+    max_ascent = max([-word.font.getMetrics().fAscent
                   for word in self.children])
     baseline = self.y + 1.25 * max_ascent
     for word in self.children:
-        word.y = baseline - word.font.metrics("ascent")
-    max_descent = max([word.font.metrics("descent")
+        word.y = baseline + word.font.getMetrics().fAscent
+    max_descent = max([word.font.getMetrics().fDescent
                 for word in self.children])
     self.height = 1.25 * (max_ascent + max_descent)
   
@@ -232,6 +266,9 @@ class LineLayout:
 
   def should_paint(self):
     return True
+  
+  def paint_effects(self, cmds):
+    return cmds
 
 class TextLayout:
   def __init__(self, node, word, parent, previous):
@@ -253,15 +290,15 @@ class TextLayout:
     size = int(float(self.node.style["font-size"][:-2]) * .75)
     self.font = get_font(size, weight, style)
 
-    self.width = self.font.measure(self.word)
+    self.width = self.font.measureText(self.word)
 
     if self.previous:
-      space = self.previous.font.measure(" ")
+      space = self.previous.font.measureText(" ")
       self.x = self.previous.x + space + self.previous.width
     else:
       self.x = self.parent.x
 
-    self.height = self.font.metrics("linespace")
+    self.height = linespace(self.font)
   
   def paint(self):
     color = self.node.style["color"]
@@ -272,6 +309,9 @@ class TextLayout:
   
   def should_paint(self):
     return True
+  
+  def paint_effects(self, cmds):
+    return cmds
 
 class InputLayout:
   def __init__(self, node, parent, previous):
@@ -295,20 +335,23 @@ class InputLayout:
     self.width = INPUT_WIDTH_PX
 
     if self.previous:
-      space = self.previous.font.measure(" ")
+      space = self.previous.font.measureText(" ")
       self.x = self.previous.x + space + self.previous.width
     else:
       self.x = self.parent.x
 
-    self.height = self.font.metrics("linespace")
+    self.height = linespace(self.font)
 
   def paint(self):
     cmds = []
     bgcolor = self.node.style.get("background-color", "transparent")
 
     if bgcolor != "transparent":
-      rect = DrawRect(Rect(self.x, self.y, self.x + self.width, self.y + self.height), bgcolor)
-      cmds.append(rect)
+      radius = float(
+        self.node.style.get(
+          "border-radius", "0px")[:-2])
+      cmds.append(DrawRRect(
+        self.self_rect(), radius, bgcolor))
 
     if self.node.tag == "input":
       text = self.node.attributes.get("value", "")
@@ -324,10 +367,16 @@ class InputLayout:
     )
 
     if self.node.is_focused:
-      cx = self.x + self.font.measure(text)
+      cx = self.x + self.font.measureText(text)
       cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
 
     return cmds
   
   def should_paint(self):
     return True
+  
+  def paint_effects(self, cmds):
+    return cmds
+  
+  def self_rect(self):
+    return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)

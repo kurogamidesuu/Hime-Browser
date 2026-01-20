@@ -55,6 +55,7 @@ class URL:
     method = "POST" if payload else "GET"
     request = "{} {} HTTP/1.0\r\n".format(method, self.path)
     request += "Host: {}\r\n".format(self.host)
+    request += "Connection: close\r\n"
 
     if self.host in COOKIE_JAR:
       cookie, params = COOKIE_JAR[self.host]

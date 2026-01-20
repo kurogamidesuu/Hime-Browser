@@ -20,3 +20,16 @@ INHERITED_PROPERTIES = {
   "font-weight": "normal",
   "color": "black",
 }
+
+NAMED_COLORS = {
+  "black": "#000000",
+  "gray":  "#808080",
+  "white": "#ffffff",
+  "red":   "#ff0000",
+  "green": "#00ff00",
+  "blue":  "#0000ff",
+  "lightblue": "#add8e6",
+  "lightgreen": "#90ee90",
+  "orange": "#ffa500",
+  "orangered": "#ff4500",
+}
