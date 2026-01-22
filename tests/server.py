@@ -62,16 +62,14 @@ def show_comments(session):
   out = "<!doctype html>"
   
   if "user" in session:
+    out += "<h1>Hello, " + session["user"] + "</h1>"
     nonce = str(random.random())[2:]
     session["nonce"] = nonce
-
-    out += "<h1>Hello, " + session["user"] + "</h1>"
     out += "<form action=add method=post>"
     out += "<p><input name=guest></p>"
+    out += "<input name=nonce type=hidden value=" + nonce + ">"
     out += "<p><button>Sign the book!</button></p>"
     out += "</form>"
-    out += "<input name=nonce type=hidden value=" + nonce + ">"
-    out += "<script src=https://example.com/evil.js></script>"
   else:
     out += "<a href=/login>Sign in to write in the guest book</a>"
 
@@ -79,8 +77,10 @@ def show_comments(session):
     out += "<p>" + html.escape(entry) + "\n"
     out += "<i>by " + html.escape(who) + "</i></p>"
   
+  out += "<link rel=stylesheet src=/browser.css>"
   out += "<strong></strong>"
   out += "<script src=/tests/test_9.js></script>"
+  out += "<script src=https://example.com/evil.js></script>"
 
   return out
 
@@ -99,6 +99,11 @@ def do_request(session, method, url, headers, body):
   elif method == "POST" and url == "/":
     params = form_decode(body)
     return do_login(session, params)
+  elif method == "GET" and url == "/count":
+    return "200 OK", show_count()
+  elif method == "GET" and url == "/tests/eventloop.js":
+    with open("tests/eventloop.js") as f:
+      return "200 OK", f.read()
   else:
     return "404 Not Found", not_found(url, method)
   
@@ -142,6 +147,15 @@ def do_login(session, params):
     out = "<!doctype html>"
     out += "<h1>Invalid password for {}</h1>".format(username)
     return "401 Unathorized", out
+
+def show_count():
+  out = "<!doctype html>"
+  out += "<div>"
+  out += "  Let's count up to 99!"
+  out += "</div>"
+  out += "<div>Output</div>"
+  out += "<script src=/tests/eventloop.js></script>"
+  return out
 
 if __name__ == "__main__":
   s = socket.socket(

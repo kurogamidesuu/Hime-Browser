@@ -1,18 +1,19 @@
 console.log("Hello! This is printing from inside JavaScript!");
 
-var strong = document.querySelectorAll("strong")[0]
 var allow_submit = true
+var strong = document.querySelectorAll("strong")[0]
 
 function checkLength() {
-  var name = this.getAttribute("name");
-  var value = this.getAttribute("value") || "";
+  var value = this.getAttribute("value");
   allow_submit = value.length <= 100;
   if (!allow_submit) {
     strong.innerHTML = 'Comment too long!';
+  } else {
+    strong.innerHTML = "";
   }
 }
 
-var inputs = document.querySelectorAll("input")
+var inputs = document.querySelectorAll("input");
 for (var i = 0; i < inputs.length; i++) {
  inputs[i].addEventListener("keydown", checkLength);
 }
