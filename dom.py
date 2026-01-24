@@ -5,6 +5,7 @@ class Text:
     self.parent = parent
     self.style = {}
     self.is_focused = False
+    self.animations = {}
   
   def __repr__(self):
     return repr(self.text)
@@ -17,6 +18,7 @@ class Element:
     self.parent = parent
     self.style = {}
     self.is_focused = False
+    self.animations = {}
 
   def __repr__(self):
     return "<" + self.tag + ">"

@@ -1,7 +1,18 @@
 import skia
 from constants import HEIGHT, WIDTH, BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX
 from dom import Text, Element
-from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Opacity, Blend
+from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Blend, Transform
+from css import parse_transform
+
+def print_composited_layers(composited_layers):
+  print("Composited layers:")
+  for layer in composited_layers:
+    print("  " * 4 + str(layer))
+
+def add_parent_pointers(nodes, parent=None):
+  for node in nodes:
+    node.parent = parent
+    add_parent_pointers(node.children, node)
 
 def paint_tree(layout_object, display_list):
   cmds = []
@@ -17,18 +28,19 @@ def paint_tree(layout_object, display_list):
 def paint_visual_effects(node, cmds, rect):
   opacity = float(node.style.get("opacity", "1.0"))
   blend_mode = node.style.get("mix-blend-mode")
+  translation = parse_transform(node.style.get("transform", ""))
 
   if node.style.get("overflow", "visible") == "clip":
+    border_radius = float(node.style.get("border-radius", "0px")[:-2])
     if not blend_mode:
       blend_mode = "source-over"
-    border_radius = float(node.style.get(
-      "border-radius", "0px"
-    )[:-2])
-    cmds.append(Blend(1.0, "destination-in", [
+    cmds.append(Blend(1.0, "destination-in", None, [
       DrawRRect(rect, border_radius, "white")
     ]))
 
-  return [Blend(opacity, blend_mode, cmds)]
+  blend_op = Blend(opacity, blend_mode, node, cmds)
+  node.blend_op = blend_op
+  return [Transform(translation, rect, node, [blend_op])]
 
 class DocumentLayout:
   def __init__(self, node, h=HEIGHT, w=WIDTH):
@@ -188,9 +200,7 @@ class BlockLayout:
 
     if bgcolor != "transparent":
       radius = float(
-        self.node.style.get(
-          "border-radius", "0px"
-        )[:-2]
+        self.node.style.get("border-radius", "0px")[:-2]
       )
       cmds.append(DrawRRect(
         self.self_rect(), radius, bgcolor
@@ -301,8 +311,10 @@ class TextLayout:
     self.height = linespace(self.font)
   
   def paint(self):
+    cmds = []
     color = self.node.style["color"]
-    return [DrawText(self.x, self.y, self.word, self.font, color)]
+    cmds.append(DrawText(self.x, self.y, self.word, self.font, color))
+    return cmds
   
   def __repr__(self):
     return ("TextLayout(x={}, y={}, width={}, height={}, word={})").format(self.x, self.y, self.width, self.height, self.word)
@@ -348,10 +360,8 @@ class InputLayout:
 
     if bgcolor != "transparent":
       radius = float(
-        self.node.style.get(
-          "border-radius", "0px")[:-2])
-      cmds.append(DrawRRect(
-        self.self_rect(), radius, bgcolor))
+        self.node.style.get("border-radius", "0px")[:-2])
+      cmds.append(DrawRRect(self.self_rect(), radius, bgcolor))
 
     if self.node.tag == "input":
       text = self.node.attributes.get("value", "")
@@ -376,7 +386,7 @@ class InputLayout:
     return True
   
   def paint_effects(self, cmds):
-    return cmds
+    return paint_visual_effects(self.node, cmds, self.self_rect())
   
   def self_rect(self):
     return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)

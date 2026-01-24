@@ -1,7 +1,7 @@
 import dukpy
 import threading
 from css import CSSParser
-from browser_ui import tree_to_list, HTMLParser
+from dom import tree_to_list, HTMLParser
 from task import Task
 
 EVENT_DISPATCH_JS = "new Node(dukpy.handle).dispatchEvent(new Event(dukpy.type))"
@@ -19,6 +19,7 @@ class JSContext:
     self.interp.export_function("querySelectorAll", self.querySelectorAll)
     self.interp.export_function("getAttribute", self.getAttribute)
     self.interp.export_function("innerHTML_set", self.innerHTML_set)
+    self.interp.export_function("style_set", self.style_set)
     self.interp.export_function("XMLHttpRequest_send", self.XMLHttpRequest_send)
     self.interp.export_function("setTimeout", self.setTimeout)
     self.interp.export_function("requestAnimationFrame", self.requestAnimationFrame)
@@ -114,5 +115,8 @@ class JSContext:
 
   def requestAnimationFrame(self):
     self.tab.browser.set_needs_animation_frame(self.tab)
-    task = Task(self.tab.render)
-    self.tab.task_runner.schedule_task(task)
+
+  def style_set(self, handle, s):
+    elt = self.handle_to_node[handle]
+    elt.attributes["style"] = s
+    self.tab.set_needs_render()
