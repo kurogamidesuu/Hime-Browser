@@ -148,15 +148,21 @@ class Browser:
 
   def handle_up(self):
     self.lock.acquire(blocking=True)
-    self.active_tab.scrollup()
+    if not self.active_tab_height:
+      self.lock.release()
+      return
+    self.active_tab_scroll = self.clamp_scroll(
+      self.active_tab_scroll - SCROLL_STEP
+    )
     self.set_needs_draw()
+    self.needs_animation_frame = True
     self.lock.release()
 
   def handle_scroll_with_mouse(self, e):
-    self.lock.acquire(blocking=True)
-    self.active_tab.scroll_with_mouse(e)
-    self.set_needs_draw()
-    self.lock.release()
+    if e > 0:
+      self.handle_up()
+    elif e < 0:
+      self.handle_down()
 
   def clamp_scroll(self, scroll):
     height = self.active_tab_height
@@ -542,32 +548,6 @@ class Tab:
     maxscroll = height - self.tab_height
     return max(0, min(scroll, maxscroll))
 
-  def scrolldown(self):
-    max_y = max(self.document.height + 2*VSTEP - self.tab_height, 0)
-    self.scroll = min(self.scroll + SCROLL_STEP, max_y)
-
-  def scrollup(self):
-    if self.scroll <= 0:
-      return
-    self.scroll -= SCROLL_STEP
-  
-  def scroll_with_mouse(self, delta):
-    if delta > 0:
-      self.scrollup()
-    elif delta < 0:
-      self.scrolldown()
-
-  def handle_resize(self, width, height, chrome_height):
-    self.width = width
-    self.height = height
-    self.tab_height = height - chrome_height
-
-    self.document = DocumentLayout(self.nodes, height, width)
-    self.document.layout()
-    self.total_height = self.document.height + 2*VSTEP
-    self.display_list = []
-    paint_tree(self.document, self.display_list)
-  
   def click(self, x, y):
     self.render()
     self.focus = None
