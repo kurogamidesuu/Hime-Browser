@@ -113,3 +113,7 @@ function __runRAFHandlers() {
     handlers_copy[i]();
   }
 }
+
+Node.prototype.setAttribute = function(attr, value) {
+  return call_python("setAttribute", this.handle, attr, value);
+}

@@ -67,26 +67,47 @@ class CSSParser:
     return pairs
   
   def selector(self):
-    out = TagSelector(self.word().casefold())
+    out = self.simple_selector()
     self.whitespace()
     while self.i < len(self.s) and self.s[self.i] != "{":
-      tag = self.word()
-      descendant = TagSelector(tag.casefold())
+      descendant = self.simple_selector()
       out = DescendantSelector(out, descendant)
       self.whitespace()
     return out
   
+  def simple_selector(self):
+    out = TagSelector(self.word().casefold())
+    if self.i < len(self.s) and self.s[self.i] == ":":
+      self.literal(":")
+      pseudoclass = self.word().casefold()
+      out = PseudoclassSelector(pseudoclass, out)
+    return out
+  
   def parse(self):
     rules = []
+    media = None
+    self.whitespace()
     while self.i < len(self.s):
       try:
-        self.whitespace()
-        selector = self.selector()
-        self.literal("{")
-        self.whitespace()
-        body = self.body()
-        self.literal("}")
-        rules.append((selector, body))
+        if self.s[self.i] == "@" and not media:
+          prop, val = self.media_query()
+          if prop == "prefers-color-scheme" and val in ["dark", "light"]:
+            media = val
+          self.whitespace()
+          self.literal("{")
+          self.whitespace()
+        elif self.s[self.i] == "}" and media:
+          self.literal("}")
+          media = None
+          self.whitespace()
+        else:
+          selector = self.selector()
+          self.literal("{")
+          self.whitespace()
+          body = self.body()
+          self.literal("}")
+          self.whitespace()
+          rules.append((media, selector, body))
       except Exception:
         why = self.ignore_until(["}"])
         if why == "}":
@@ -101,6 +122,17 @@ class CSSParser:
     while self.i < len(self.s) and self.s[self.i] not in chars:
       self.i += 1
     return self.s[start:self.i]
+  
+  def media_query(self):
+    self.literal("@")
+    assert self.word() == "media"
+    self.whitespace()
+    self.literal("(")
+    self.whitespace()
+    prop, val = self.pair([")"])
+    self.whitespace()
+    self.literal(")")
+    return prop, val
 
 class TagSelector:
   def __init__(self, tag):
@@ -123,8 +155,25 @@ class DescendantSelector:
       node = node.parent
     return False
   
+class PseudoclassSelector:
+  def __init__(self, pseudoclass, base):
+    self.pseudoclass = pseudoclass
+    self.base = base
+    self.priority = self.base.priority
+
+  def matches(self, node):
+    if not self.base.matches(node):
+      return False
+    if self.pseudoclass == "focus":
+      return node.is_focused
+    else:
+      return False
+  
+  def __repr__(self):
+    return "PseudoclassSelector({}, {})".format(self.pseudoclass, self.base)
+  
 def cascade_priority(rule):
-  selector, body = rule
+  media, selector, body = rule
   return selector.priority
 
 def style(node, rules, tab):
@@ -135,7 +184,9 @@ def style(node, rules, tab):
       node.style[property] = node.parent.style[property]
     else:
       node.style[property] = default_value  
-  for selector, body in rules:
+  for media, selector, body in rules:
+    if media:
+      if (media == "dark") != tab.dark_mode: continue
     if not selector.matches(node): continue
     for property, value in body.items():
       node.style[property] = value
@@ -215,5 +266,12 @@ def absolute_bounds_for_obj(obj):
     rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
     cur = cur.parent
   return rect
+
+def parse_outline(outline_str):
+  if not outline_str: return None
+  values = outline_str.split(" ")
+  if len(values) != 3: return None
+  if values[1] != "solid": return None
+  return int(values[0][:-2]), values[2]
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()

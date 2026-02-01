@@ -1,8 +1,8 @@
 import skia
 from constants import HEIGHT, WIDTH, BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX
 from dom import Text, Element
-from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Blend, Transform
-from css import parse_transform
+from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Blend, Transform, paint_outline
+from css import parse_transform, parse_outline
 
 def print_composited_layers(composited_layers):
   print("Composited layers:")
@@ -42,25 +42,26 @@ def paint_visual_effects(node, cmds, rect):
   node.blend_op = blend_op
   return [Transform(translation, rect, node, [blend_op])]
 
+def dpx(css_px, zoom):
+  return css_px * zoom
+
 class DocumentLayout:
   def __init__(self, node, h=HEIGHT, w=WIDTH):
     self.node = node
     self.parent = None
+    self.previous = None
     self.children = []
+    node.layout_object = self
 
-    self.x = None
-    self.y = None
-    self.width = w
-    self.height = h
-
-  def layout(self):
-    child = BlockLayout(self.node, self, None, self.height, self.width)
+  def layout(self, zoom):
+    self.zoom = zoom
+    child = BlockLayout(self.node, self, None)
     self.children.append(child)
-    self.width = self.width - 2*HSTEP
-    self.x = HSTEP
-    self.y = VSTEP
-    child.layout()
 
+    self.width = WIDTH - 2*dpx(HSTEP, self.zoom)
+    self.x = dpx(HSTEP, self.zoom)
+    self.y = dpx(VSTEP, self.zoom)
+    child.layout()
     self.height = child.height
   
   def paint(self):
@@ -73,18 +74,19 @@ class DocumentLayout:
     return cmds
 
 class BlockLayout:
-  def __init__(self, node, parent, previous, h=HEIGHT, w=WIDTH):
+  def __init__(self, node, parent, previous):
     self.node = node
     self.parent = parent
     self.previous = previous
     self.children = []
-
     self.x = None
     self.y = None
-    self.width = w
-    self.height = h
+    self.width = None
+    self.height = None
+    node.layout_object = self
 
   def layout(self):
+    self.zoom = self.parent.zoom
     self.width = self.parent.width
     self.x = self.parent.x
 
@@ -172,7 +174,8 @@ class BlockLayout:
   def word(self, node, word):
     weight = node.style["font-weight"]
     style = node.style["font-style"]
-    size = int(float(node.style["font-size"][:-2]) * .75)
+    px_size = float(node.style["font-size"][:-2])
+    size = dpx(px_size * 0.75, self.zoom)
     font = get_font(size, weight, style)
 
     word_width = font.measureText(word)
@@ -199,8 +202,9 @@ class BlockLayout:
     bgcolor = self.node.style.get("background-color", "transparent")
 
     if bgcolor != "transparent":
-      radius = float(
-        self.node.style.get("border-radius", "0px")[:-2]
+      radius = dpx(float(
+        self.node.style.get("border-radius", "0px")[:-2]),
+        self.zoom
       )
       cmds.append(DrawRRect(
         self.self_rect(), radius, bgcolor
@@ -208,7 +212,7 @@ class BlockLayout:
     return cmds
   
   def input(self, node):
-    w = INPUT_WIDTH_PX
+    w = dpx(INPUT_WIDTH_PX, self.zoom)
     if self.cursor_x + w > self.width:
       self.new_line()
     line = self.children[-1]
@@ -218,7 +222,8 @@ class BlockLayout:
 
     weight = node.style["font-weight"]
     style = node.style["font-style"]
-    size = int(float(node.style["font-size"][:-2]) * .75)
+    px_size = float(node.style["font-size"][:-2])
+    size = dpx(px_size * 0.75, self.zoom)
     font = get_font(size, weight, style)
 
     self.cursor_x += w + font.measureText(" ")
@@ -244,6 +249,7 @@ class LineLayout:
     self.width = None
 
   def layout(self):
+    self.zoom = self.parent.zoom
     self.width = self.parent.width
     self.x = self.parent.x
 
@@ -277,7 +283,21 @@ class LineLayout:
   def should_paint(self):
     return True
   
+  def self_rect(self):
+    return skia.Rect.MakeLTRB(
+      self.x, self.y, self.x + self.width, self.y + self.height
+    )
+  
   def paint_effects(self, cmds):
+    outline_rect = skia.Rect.MakeEmpty()
+    outline_node = None
+    for child in self.children:
+      outline_str = child.node.parent.style.get("outline")
+      if parse_outline(outline_str):
+        outline_rect.join(child.self_rect())
+        outline_node = child.node.parent
+    if outline_node:
+      paint_outline(outline_node, cmds, outline_rect, self.zoom)
     return cmds
 
 class TextLayout:
@@ -294,10 +314,11 @@ class TextLayout:
     self.font = None
 
   def layout(self):
+    self.zoom = self.parent.zoom
     weight = self.node.style["font-weight"]
     style = self.node.style["font-style"]
-    if style == "normal": style = "roman"
-    size = int(float(self.node.style["font-size"][:-2]) * .75)
+    px_size = float(self.node.style["font-size"][:-2])
+    size = dpx(px_size * 0.75, self.zoom)
     self.font = get_font(size, weight, style)
 
     self.width = self.font.measureText(self.word)
@@ -315,6 +336,11 @@ class TextLayout:
     color = self.node.style["color"]
     cmds.append(DrawText(self.x, self.y, self.word, self.font, color))
     return cmds
+  
+  def self_rect(self):
+    return skia.Rect.MakeLTRB(
+      self.x, self.y, self.x + self.width, self.y + self.height
+    )
   
   def __repr__(self):
     return ("TextLayout(x={}, y={}, width={}, height={}, word={})").format(self.x, self.y, self.width, self.height, self.word)
@@ -338,13 +364,15 @@ class InputLayout:
     self.font = None
 
   def layout(self):
+    self.zoom = self.parent.zoom
     weight = self.node.style["font-weight"]
     style = self.node.style["font-style"]
-    if style == "normal": style = "roman"
-    size = int(float(self.node.style["font-size"][:-2]) * .75)
+    px_size = float(self.node.style["font-size"][:-2])
+    size = dpx(px_size * 0.75, self.zoom)
     self.font = get_font(size, weight, style)
 
-    self.width = INPUT_WIDTH_PX
+    self.width = dpx(INPUT_WIDTH_PX, self.zoom)
+    self.height = linespace(self.font)
 
     if self.previous:
       space = self.previous.font.measureText(" ")
@@ -352,15 +380,13 @@ class InputLayout:
     else:
       self.x = self.parent.x
 
-    self.height = linespace(self.font)
-
   def paint(self):
     cmds = []
     bgcolor = self.node.style.get("background-color", "transparent")
 
     if bgcolor != "transparent":
-      radius = float(
-        self.node.style.get("border-radius", "0px")[:-2])
+      radius = dpx(float(
+        self.node.style.get("border-radius", "0px")[:-2]), self.zoom)
       cmds.append(DrawRRect(self.self_rect(), radius, bgcolor))
 
     if self.node.tag == "input":
@@ -376,7 +402,7 @@ class InputLayout:
       DrawText(self.x, self.y, text, self.font, color)
     )
 
-    if self.node.is_focused:
+    if self.node.is_focused and self.node.tag == "input":
       cx = self.x + self.font.measureText(text)
       cmds.append(DrawLine(cx, self.y, cx, self.y + self.height, "black", 1))
 
@@ -386,7 +412,9 @@ class InputLayout:
     return True
   
   def paint_effects(self, cmds):
-    return paint_visual_effects(self.node, cmds, self.self_rect())
+    cmds = paint_visual_effects(self.node, cmds, self.self_rect())
+    paint_outline(self.node, cmds, self.self_rect(), self.zoom)
+    return cmds
   
   def self_rect(self):
     return skia.Rect.MakeLTRB(self.x, self.y, self.x + self.width, self.y + self.height)

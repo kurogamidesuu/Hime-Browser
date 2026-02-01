@@ -6,6 +6,7 @@ class Text:
     self.style = {}
     self.is_focused = False
     self.animations = {}
+    self.layout_object = None
   
   def __repr__(self):
     return repr(self.text)
@@ -19,6 +20,7 @@ class Element:
     self.style = {}
     self.is_focused = False
     self.animations = {}
+    self.layout_object = None
 
   def __repr__(self):
     return "<" + self.tag + ">"

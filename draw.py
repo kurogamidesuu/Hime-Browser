@@ -74,6 +74,15 @@ def absolute_to_local(display_item, rect):
     rect = parent.unmap(rect)
   return rect
 
+def paint_outline(node, cmds, rect, zoom):
+  from layout import dpx
+  from css import parse_outline
+
+  outline = parse_outline(node.style.get("outline"))
+  if not outline: return
+  thickness, color = outline
+  cmds.append(DrawOutline(rect, color, dpx(thickness, zoom)))
+
 class PaintCommand:
   def __init__(self, rect):
     self.rect = rect
