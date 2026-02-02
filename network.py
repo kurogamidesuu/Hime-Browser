@@ -21,9 +21,9 @@ class URL:
       if ":" in self.host:
         self.host, port = self.host.split(":", 1)
         self.port = int(port)
-    except:
+    except Exception:
       print("Malformed URL found, falling back to the Web Browser Engineering home page.")
-      print("  URL was: " + url)
+      print("  URL was: " + str(url))
       self.__init__("https://browser.engineering")
   
   def resolve(self, url):

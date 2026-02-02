@@ -1,5 +1,5 @@
 import skia
-from constants import HEIGHT, WIDTH, BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
+from constants import WIDTH, BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
 from dom import Text, Element
 from draw import get_font, DrawRRect, DrawText, DrawLine, linespace, Blend, Transform, paint_outline, DrawImage, font
 from css import parse_transform, parse_outline
@@ -120,13 +120,6 @@ class BlockLayout:
 
     self.height = sum([child.height for child in self.children])
 
-  def layout_intermediate(self):
-    previous = None
-    for child in self.node.children:
-      next = BlockLayout(child, self, previous, self.frame)
-      self.children.append(next)
-      previous = next
-  
   def layout_mode(self):
     if isinstance(self.node, Text):
       return "inline"
@@ -140,34 +133,6 @@ class BlockLayout:
       return "inline"
     else:
       return "block"
-
-  # def open_tag(self, tag):
-  #   if tag == "i":
-  #     self.style = "italic"
-  #   elif tag == "b":
-  #     self.weight = "bold"
-  #   elif tag == "small":
-  #     self.size -= 2
-  #   elif tag == "big":
-  #     self.size += 4
-  #   elif tag == "br":
-  #     self.flush()
-  #   elif tag == "p":
-  #     self.new_line()
-  #     self.cursor_y += VSTEP
-  
-  # def close_tag(self, tag):
-  #   if tag == "i":
-  #     self.style = "roman"
-  #   elif tag == "b":
-  #     self.weight = "normal"
-  #   elif tag == "small":
-  #     self.size += 2
-  #   elif tag == "big":
-  #     self.size -= 4
-  #   elif tag == "p":
-  #     self.new_line()
-  #     self.cursor_y += VSTEP
 
   def recurse(self, node):
     if isinstance(node, Text):
@@ -201,8 +166,8 @@ class BlockLayout:
     self.add_inline_child(node, w, ImageLayout, self.frame)
   
   def iframe(self, node):
-    if "width" in self.node.attributes:
-      w = dpx(int(self.node.attributes["width"]), self.zoom)
+    if "width" in node.attributes:
+      w = dpx(int(node.attributes["width"]), self.zoom)
     else:
       w = IFRAME_WIDTH_PX + dpx(2, self.zoom)
     self.add_inline_child(node, w, IframeLayout, self.frame)

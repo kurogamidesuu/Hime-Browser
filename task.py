@@ -109,9 +109,11 @@ class MeasureTime:
 
   def finish(self):
     self.lock.acquire(blocking=True)
+    ts = time.time() * 1000000
     for thread in threading.enumerate():
       self.file.write(
         ', { "ph": "M", "name": "thread_name",' +
+        '"ts": ' + str(ts) + ',' +
         '"pid": 1, "tid": ' + str(thread.ident) + ',' +
         '"args": { "name": "' + thread.name + '"}}'
       )

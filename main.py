@@ -72,6 +72,6 @@ def mainloop(browser):
 if __name__ == "__main__":
   sdl2.SDL_Init(sdl2.SDL_INIT_EVENTS)
   browser = Browser()
-  browser.new_tab(URL(sys.argv[1]))
+  browser.new_tab(URL(sys.argv[1] if len(sys.argv) > 1 else "https://browser.engineering/"))
   browser.draw()
   mainloop(browser)

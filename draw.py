@@ -71,8 +71,8 @@ def font(style, zoom):
   size = None
   try:
     size = float(style["font-size"][:-2]) * 0.75
-  except:
-    size = 16 
+  except (ValueError, TypeError):
+    size = 16
   font_size = dpx(size, zoom)
   return get_font(font_size, weight, variant)
 

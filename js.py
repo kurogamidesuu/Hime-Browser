@@ -158,7 +158,7 @@ class JSContext:
     self.interp.evaljs("WINDOWS[{}] = window_{};".format(frame.window_id, frame.window_id))
         
   def wrap(self, script, window_id):
-    return "window = window_{}; {}".format(window_id, script)
+    return "window = window_{}; document = window.document; {}".format(window_id, script)
   
   def dispatch_RAF(self, window_id):
     code = self.wrap("window.__runRAFHandlers()", window_id)

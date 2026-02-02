@@ -5,9 +5,9 @@ import math
 import threading
 import OpenGL.GL
 from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES, BROKEN_IMAGE
-from dom import HTMLParser, Text, tree_to_list, print_tree
+from dom import HTMLParser, Text, Element, tree_to_list, print_tree
 from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj
-from layout import Element, DocumentLayout, paint_tree, get_font, add_parent_pointers, dpx
+from layout import DocumentLayout, paint_tree, get_font, add_parent_pointers, dpx
 from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute
 from network import URL
 from js import JSContext
@@ -29,7 +29,7 @@ class Browser:
     sdl2.SDL_GL_SetAttribute(sdl2.SDL_GL_CONTEXT_PROFILE_MASK, sdl2.SDL_GL_CONTEXT_PROFILE_CORE)
 
     self.gl_context = sdl2.SDL_GL_CreateContext(self.sdl_window)
-    print(("OpenGL initiallized: vendor={}, renderer={}").format(OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR), OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER)))
+    print(("OpenGL initialized: vendor={}, renderer={}").format(OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR), OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER)))
 
     self.skia_context = skia.GrDirectContext.MakeGL()
 
@@ -60,17 +60,6 @@ class Browser:
 
     self.measure = MeasureTime()
     threading.current_thread().name = "Browser thread"
-
-    if sdl2.SDL_BYTEORDER == sdl2.SDL_BIG_ENDIAN:
-      self.RED_MASK = 0xff000000
-      self.GREEN_MASK = 0x00ff0000
-      self.BLUE_MASK = 0x0000ff00
-      self.ALPHA_MASK = 0x000000ff
-    else:
-      self.RED_MASK = 0x000000ff
-      self.GREEN_MASK = 0x0000ff00
-      self.BLUE_MASK = 0x00ff0000
-      self.ALPHA_MASK = 0xff000000
 
     self.animation_timer = None
 
@@ -104,7 +93,7 @@ class Browser:
     self.lock.acquire(blocking=True)
     if tab == self.active_tab:
       self.active_tab_url = data.url
-      if data.scroll != None:
+      if data.scroll is not None:
         self.active_tab_scroll = data.scroll
       self.root_frame_focused = data.root_frame_focused
       self.active_tab_height = data.height
@@ -116,7 +105,7 @@ class Browser:
       if self.accessibility_tree:
         self.set_needs_accessibility()
       self.tab_focus = data.focus
-      if self.composited_updates == None:
+      if self.composited_updates is None:
         self.composited_updates = {}
         self.set_needs_composite()
       else:
@@ -133,7 +122,7 @@ class Browser:
   def clear_data(self):
     self.active_tab_scroll = 0
     self.active_tab_url = None
-    self.display_list = []
+    self.active_tab_display_list = None
     self.composited_layers = []
     self.composited_updates = {}
     self.accessibility_tree = None
@@ -281,33 +270,16 @@ class Browser:
     self.chrome_surface.draw(canvas, 0, 0)
     canvas.restore()
 
-    # skia_image = self.root_surface.makeImageSnapshot()
-    # skia_bytes = skia_image.tobytes()
-
-    # depth = 32
-    # pitch = 4 * WIDTH
-    # sdl_surface = sdl2.SDL_CreateRGBSurfaceFrom(
-    #   skia_bytes, WIDTH, HEIGHT, depth, pitch,
-    #   self.RED_MASK, self.GREEN_MASK, self.BLUE_MASK, self.ALPHA_MASK
-    # )
-
-    # rect = sdl2.SDL_Rect(0, 0, WIDTH, HEIGHT)
-    # window_surface = sdl2.SDL_GetWindowSurface(self.sdl_window)
-    # sdl2.SDL_BlitSurface(sdl_surface, rect, window_surface, rect)
-    # sdl2.SDL_UpdateWindowSurface(self.sdl_window)
     self.root_surface.flushAndSubmit()
     sdl2.SDL_GL_SwapWindow(self.sdl_window)
 
   def composite_raster_and_draw(self):
-    import time
-
     self.lock.acquire(blocking=True)
     if not self.needs_composite and len(self.composited_updates) == 0 and not self.needs_raster and not self.needs_draw and not self.needs_accessibility:
       self.lock.release()
       return
     
     self.measure.time('composite-raster-and-draw')
-    start_time = time.time()
     if self.needs_composite:
       self.measure.time('composite')
       self.composite()
@@ -467,6 +439,8 @@ class Browser:
         if not self.hovered_a11y_node or a11y_node.node != self.hovered_a11y_node.node:
           self.needs_speak_hovered_node = True
         self.hovered_a11y_node = a11y_node
+      else:
+        self.hovered_a11y_node = None
       self.pending_hover = None
     
     if self.hovered_a11y_node:
@@ -510,10 +484,9 @@ class Browser:
     if not self.has_spoken_document:
       self.speak_document()
       self.has_spoken_document = True
-    
-    self.active_alerts = [node
-      for node in tree_to_list(self.accessibility_tree, [])
-      if node.role == "alert"]
+
+    a11y_tree_list = tree_to_list(self.accessibility_tree, [])
+    self.active_alerts = [node for node in a11y_tree_list if node.role == "alert"]
 
     for alert in self.active_alerts:
       if alert not in self.spoken_alerts:
@@ -523,17 +496,15 @@ class Browser:
     new_spoken_alerts = []
     for old_node in self.spoken_alerts:
       new_nodes = [
-        node for node in tree_to_list(self.accessibility_tree, [])
-        if node.node == old_node.node
-        and node.role == "alert"
+        node for node in a11y_tree_list
+        if node.node == old_node.node and node.role == "alert"
       ]
       if new_nodes:
         new_spoken_alerts.append(new_nodes[0])
     self.spoken_alerts = new_spoken_alerts
 
     if self.tab_focus and self.tab_focus != self.last_tab_focus:
-      nodes = [node for node in tree_to_list(self.accessibility_tree, [])
-               if node.node == self.tab_focus]
+      nodes = [node for node in a11y_tree_list if node.node == self.tab_focus]
       if nodes:
         self.focus_a11y_node = nodes[0]
         self.speak_node(self.focus_a11y_node, "element focused ")
@@ -605,7 +576,7 @@ class Frame:
     self.tab.set_needs_paint()
 
   def allowed_request(self, url):
-    return self.allowed_origins == None or url.origin() in self.allowed_origins
+    return self.allowed_origins is None or url.origin() in self.allowed_origins
 
   def load(self, url, payload=None):
     self.loaded = False
@@ -642,7 +613,7 @@ class Frame:
 
       try:
         header, body = script_url.request(url)
-      except:
+      except Exception:
         continue
       body = body.decode("utf8", "replace")
       task = Task(self.js.run, script_url, body, self.window_id)
@@ -664,7 +635,7 @@ class Frame:
 
       try:
         header, body = style_url.request(url)
-      except:
+      except Exception:
         continue
       body = body.decode("utf8", "replace")
       self.rules.extend(CSSParser(body).parse())
@@ -849,6 +820,8 @@ class Frame:
     self.scroll_changed_in_frame = True
 
   def clamp_scroll(self, scroll):
+    if not self.document:
+      return 0
     height = math.ceil(self.document.height + 2*VSTEP)
     maxscroll = height - self.frame_height
     return max(0, min(scroll, maxscroll))
@@ -1001,17 +974,15 @@ class Tab:
   def zoom_by(self, increment):
     if increment > 0:
       self.zoom *= 1.1
-      self.scroll *= 1.1
+      self.root_frame.scroll *= 1.1
     else:
       self.zoom *= 1/1.1
-      self.scroll *= 1/1.1
-    self.scroll_changed_in_tab = True
+      self.root_frame.scroll *= 1/1.1
     self.set_needs_render_all_frames()
   
   def reset_zoom(self):
-    self.scroll /= self.zoom
+    self.root_frame.scroll /= self.zoom
     self.zoom = 1
-    self.scroll_changed_in_tab = True
     self.set_needs_render_all_frames()
 
   def set_dark_mode(self, val):
@@ -1357,6 +1328,8 @@ class FrameAccessibilityNode(AccessibilityNode):
     rect.intersect(bounds)
 
 def is_focusable(node):
+  if not isinstance(node, Element):
+    return False
   if get_tabindex(node) < 0:
     return False
   elif "tabindex" in node.attributes:
@@ -1365,6 +1338,8 @@ def is_focusable(node):
     return node.tag in ["input", "button", "a"]
 
 def get_tabindex(node):
+  if not isinstance(node, Element):
+    return -1
   tabindex = int(node.attributes.get("tabindex", "9999999"))
   return 9999999 if tabindex == 0 else tabindex
 
