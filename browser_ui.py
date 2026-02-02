@@ -4,10 +4,10 @@ import urllib.parse
 import math
 import threading
 import OpenGL.GL
-from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES
+from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES, BROKEN_IMAGE
 from dom import HTMLParser, Text, tree_to_list, print_tree
 from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj
-from layout import Element, DocumentLayout, paint_tree, get_font, add_parent_pointers
+from layout import Element, DocumentLayout, paint_tree, get_font, add_parent_pointers, dpx
 from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute
 from network import URL
 from js import JSContext
@@ -98,6 +98,7 @@ class Browser:
     self.focus_a11y_node = None
     self.active_alerts = []
     self.spoken_alerts = []
+    self.root_frame_focused = False
 
   def commit(self, tab, data):
     self.lock.acquire(blocking=True)
@@ -105,6 +106,7 @@ class Browser:
       self.active_tab_url = data.url
       if data.scroll != None:
         self.active_tab_scroll = data.scroll
+      self.root_frame_focused = data.root_frame_focused
       self.active_tab_height = data.height
       if data.display_list:
         self.active_tab_display_list = data.display_list
@@ -157,13 +159,19 @@ class Browser:
 
   def handle_down(self):
     self.lock.acquire(blocking=True)
-    if not self.active_tab_height:
+    if self.root_frame_focused:
+      if not self.active_tab_height:
+        self.lock.release()
+        return
+      self.active_tab_scroll = self.clamp_scroll(
+        self.active_tab_scroll + SCROLL_STEP
+      )
+      self.set_needs_draw()
+      self.needs_animation_frame = True
       self.lock.release()
       return
-    self.active_tab_scroll = self.clamp_scroll(
-      self.active_tab_scroll + SCROLL_STEP
-    )
-    self.set_needs_draw()
+    task = Task(self.active_tab.scrolldown)
+    self.active_tab.task_runner.schedule_task(task)
     self.needs_animation_frame = True
     self.lock.release()
 
@@ -341,7 +349,7 @@ class Browser:
     self.active_tab = tab
     task = Task(self.active_tab.set_dark_mode, self.dark_mode)
     self.active_tab.task_runner.schedule_task(task)
-    task = Task(self.active_tab.set_needs_paint)
+    task = Task(self.active_tab.set_needs_render_all_frames)
     self.active_tab.task_runner.schedule_task(task)
 
     self.clear_data()
@@ -563,55 +571,50 @@ class Browser:
     self.active_tab.task_runner.schedule_task(task)
     self.clear_data()
   
-
-class Tab:
-  def __init__(self, browser, tab_height):
-    self.history = []
-    self.tab_height = tab_height
-    self.focus = None
-    self.needs_focus_scroll = False
-    self.url = None
-    self.scroll = 0
-    self.scroll_changed_in_tab = False
-    self.needs_raf_callbacks = False
+class Frame:
+  def __init__(self, tab, parent_frame, frame_element):
+    self.tab = tab
+    self.parent_frame = parent_frame
+    self.frame_element = frame_element
     self.needs_style = False
     self.needs_layout = False
-    self.needs_paint = False
-    self.needs_accessibility = False
-    self.accessibility_tree = None
-    self.document = None
-    self.dark_mode = browser.dark_mode
     self.loaded = False
+
+    self.document = None
+    self.scroll = 0
+    self.scroll_changed_in_frame = False
+    self.needs_focus_scroll = False
+    self.nodes = None
+    self.url = None
     self.js = None
 
-    self.browser = browser
-    self.task_runner = TaskRunner(self)
-    self.task_runner.start_thread()
+    self.window_id = len(self.tab.window_id_to_frame)
+    self.tab.window_id_to_frame[self.window_id] = self
 
-    self.composited_updates = []
-    self.zoom = 1.0
+    self.frame_width = 0
+    self.frame_height = 0
 
-  def raster(self, canvas):
-    for cmd in self.display_list:
-      cmd.execute(canvas)
-  
-  def go_back(self):
-    if len(self.history) > 1:
-      self.history.pop()
-      back = self.history.pop()
-      self.load(back)
+  def set_needs_render(self):
+    self.needs_style = True
+    self.tab.needs_accessibility = True
+    self.tab.set_needs_paint()
+
+  def set_needs_layout(self):
+    self.needs_layout = True
+    self.tab.needs_accessibility = True
+    self.tab.set_needs_paint()
+
+  def allowed_request(self, url):
+    return self.allowed_origins == None or url.origin() in self.allowed_origins
 
   def load(self, url, payload=None):
     self.loaded = False
-    self.focus_element(None)
     self.zoom = 1
     self.scroll = 0
-    self.scroll_changed_in_tab = True
-    self.task_runner.clear_pending_tasks()
+    self.scroll_changed_in_frame = True
     headers, body = url.request(self.url, payload)
+    body = body.decode("utf8", "replace")
     self.url = url
-    self.accessibility_tree = None
-    self.history.append(url)
 
     self.allowed_origins = None
     if "content-security-policy" in headers:
@@ -622,13 +625,15 @@ class Tab:
     self.nodes = HTMLParser(body).parse()
     
     if self.js: self.js.discarded = True
-    self.js = JSContext(self)
+    self.js = self.tab.get_js(url)
+    self.js.add_window(self)
+
+    # scripts
     scripts = [node.attributes["src"]
                for node in tree_to_list(self.nodes, [])
                if isinstance(node, Element)
                and node.tag == "script"
                and "src" in node.attributes]
-    
     for script in scripts:
       script_url = url.resolve(script)
       if not self.allowed_request(script_url):
@@ -639,9 +644,11 @@ class Tab:
         header, body = script_url.request(url)
       except:
         continue
-      task = Task(self.js.run, script_url, body)
-      self.task_runner.schedule_task(task)
+      body = body.decode("utf8", "replace")
+      task = Task(self.js.run, script_url, body, self.window_id)
+      self.tab.task_runner.schedule_task(task)
 
+    # styles
     self.rules = DEFAULT_STYLE_SHEET.copy()
     links = [node.attributes["href"]
              for node in tree_to_list(self.nodes, [])
@@ -659,30 +666,50 @@ class Tab:
         header, body = style_url.request(url)
       except:
         continue
+      body = body.decode("utf8", "replace")
       self.rules.extend(CSSParser(body).parse())
+
+    # images
+    images = [node
+              for node in tree_to_list(self.nodes, [])
+              if isinstance(node, Element)
+              and node.tag == "img"]
+    for img in images:
+      try:
+        src = img.attributes.get("src", "")
+        image_url = url.resolve(src)
+        assert self.allowed_request(image_url), "Blocked load of " + str(image_url) + " due to CSP"
+        header, body = image_url.request(url)
+        img.encoded_data = body
+        data = skia.Data.MakeWithoutCopy(body)
+        img.image = skia.Image.MakeFromEncoded(data)
+        assert img.image, "Failed to recognize image format for " + str(image_url)
+      except Exception as e:
+        print("Image", img.attributes.get("src", ""), "crashed", e)
+        img.image = BROKEN_IMAGE
+    
+    # iframes
+    iframes = [node
+               for node in tree_to_list(self.nodes, [])
+               if isinstance(node, Element)
+               and node.tag == "iframe"
+               and "src" in node.attributes]
+    for iframe in iframes:
+      document_url = url.resolve(iframe.attributes["src"])
+      if not self.allowed_request(document_url):
+        print("Blocked iframe", document_url, "due to CSP")
+        iframe.frame = None
+        continue
+      iframe.frame = Frame(self.tab, self, iframe)
+      task = Task(iframe.frame.load, document_url)
+      self.tab.task_runner.schedule_task(task)
+
     self.set_needs_render()
     self.loaded = True
-
-  def allowed_request(self, url):
-    return self.allowed_origins == None or url.origin() in self.allowed_origins
-
-  def set_needs_render(self):
-    self.needs_style = True
-    self.browser.set_needs_animation_frame(self)
-
-  def set_needs_layout(self):
-    self.needs_layout = True
-    self.browser.set_needs_animation_frame(self)
-
-  def set_needs_paint(self):
-    self.needs_paint = True
-    self.browser.set_needs_animation_frame(self)
-
+  
   def render(self):
-    self.browser.measure.time('render')
-
     if self.needs_style:
-      if self.dark_mode:
+      if self.tab.dark_mode:
         INHERITED_PROPERTIES["color"] = "white"
       else:
         INHERITED_PROPERTIES["color"] = "black"
@@ -691,181 +718,49 @@ class Tab:
       self.needs_style = False
 
     if self.needs_layout:
-      self.document = DocumentLayout(self.nodes)
-      self.document.layout(self.zoom)
-      self.needs_accessibility = True
+      self.document = DocumentLayout(self.nodes, self)
+      self.document.layout(self.frame_width, self.tab.zoom)
+      self.tab.needs_accessibility = True
       self.needs_paint = True
       self.needs_layout = False
 
-    if self.needs_accessibility:
-      self.accessibility_tree = AccessibilityNode(self.nodes)
-      self.accessibility_tree.build()
-      self.needs_accessibility = False
-
-    if self.needs_paint:
-      self.display_list = []
-      paint_tree(self.document, self.display_list)
-      self.needs_paint = False
-
     clamped_scroll = self.clamp_scroll(self.scroll)
     if clamped_scroll != self.scroll:
-      self.scroll_changed_in_tab = True
+      self.scroll_changed_in_frame = True
     self.scroll = clamped_scroll
-
-    self.browser.measure.stop('render')
-  
-  def run_animation_frame(self, scroll):
-    if not self.scroll_changed_in_tab:
-      self.scroll = scroll
-    self.browser.measure.time('script-runRAFHandlers')
-    self.js.interp.evaljs("__runRAFHandlers()")
-    self.browser.measure.stop('script-runRAFHandlers')
-
-    for node in tree_to_list(self.nodes, []):
-      for (property_name, animation) in node.animations.items():
-        value = animation.animate()
-        if value:
-          node.style[property_name] = value
-          self.composited_updates.append(node)
-          self.set_needs_paint()
-
-    needs_composite = self.needs_style or self.needs_layout
-    self.render()
-
-    if self.needs_focus_scroll and self.focus:
-      self.scroll_to(self.focus)
-    self.needs_focus_scroll = False
-
-    scroll = None
-    if self.scroll_changed_in_tab:
-      scroll = self.scroll
-
-    composited_updates = None
-    if not needs_composite:
-      composited_updates = {}
-      for node in self.composited_updates:
-        composited_updates[node] = node.blend_op
-    self.composited_updates = []
-    
-    document_height = math.ceil(self.document.height + 2*VSTEP)
-    commit_data = CommitData(
-      self.url, scroll, document_height, self.display_list, composited_updates, self.accessibility_tree, self.focus
-    )
-    self.display_list = None
-    self.scroll_changed_in_tab = False
-    self.accessibility_tree = None
-    self.browser.commit(self, commit_data)
-
-  def clamp_scroll(self, scroll):
-    height = math.ceil(self.document.height + 2*VSTEP)
-    maxscroll = height - self.tab_height
-    return max(0, min(scroll, maxscroll))
-  
-  def scroll_to(self, elt):
-    assert not (self.needs_style or self.needs_layout)
-    objs = [
-      obj for obj in tree_to_list(self.document, [])
-      if obj.node == self.focus
-    ]
-    if not objs: return
-    obj = objs[0]
-
-    if self.scroll < obj.y < self.scroll + self.tab_height:
-      return
-
-    document_height = math.ceil(self.document.height + 2*VSTEP)
-    new_scroll = obj.y - SCROLL_STEP
-    self.scroll = self.clamp_scroll(new_scroll)
-    self.scroll_changed_in_tab = True
-  
-  def zoom_by(self, increment):
-    if increment:
-      self.zoom *= 1.1
-      self.scroll *= 1.1
-    else:
-      self.zoom *= 1/1.1
-      self.scroll *= 1/1.1
-    self.scroll_changed_in_tab = True
-    self.set_needs_render()
-  
-  def reset_zoom(self):
-    self.scroll /= self.zoom
-    self.zoom = 1
-    self.scroll_changed_in_tab = True
-    self.set_needs_render()
-
-  def click(self, x, y):
-    self.render()
-    self.focus_element(None)
-    y += self.scroll
-    loc_rect = skia.Rect.MakeXYWH(x, y, 1, 1)
-    objs = [obj for obj in tree_to_list(self.document, [])
-            if absolute_bounds_for_obj(obj).intersects(loc_rect)]
-    if not objs: return
-    elt = objs[-1].node
-    if elt and self.js.dispatch_event("click", elt): return
-    while elt:
-      if isinstance(elt, Text):
-        pass
-      elif is_focusable(elt):
-        self.focus_element(elt)
-        self.activate_element(elt)
-        return
-      elt = elt.parent
-
-  def submit_form(self, elt):
-    if self.js.dispatch_event("submit", elt): return
-    inputs = [node for node in tree_to_list(elt, [])
-              if isinstance(node, Element)
-              and node.tag == "input"
-              and "name" in node.attributes]
-    body = ""
-    for input in inputs:
-      name = input.attributes["name"]
-      value = input.attributes.get("value", "")
-      name = urllib.parse.quote(name)
-      value = urllib.parse.quote(value)
-      body += "&" + name + "=" + value
-    body = body[1:]
-
-    url = self.url.resolve(elt.attributes["action"])
-    self.load(url, body)
-  
-  def keypress(self, char):
-    if self.focus and self.focus.tag == "input":
-      if not "value" in self.focus.attributes:
-        self.activate_element(self.focus)
-      if self.js.dispatch_event("keydown", self.focus): return
-      self.focus.attributes["value"] += char
-      self.set_needs_render()
-
-  def set_dark_mode(self, val):
-    self.dark_mode = val
-    self.set_needs_render()
 
   def advance_tab(self):
     focusable_nodes = [node
       for node in tree_to_list(self.nodes, [])
-      if isinstance(node, Element) and is_focusable(node)]
+      if isinstance(node, Element) and is_focusable(node)
+      and get_tabindex(node) >= 0]
     focusable_nodes.sort(key=get_tabindex)
 
-    if self.focus in focusable_nodes:
-      idx = focusable_nodes.index(self.focus) + 1
+    if self.tab.focus in focusable_nodes:
+      idx = focusable_nodes.index(self.tab.focus) + 1
     else:
       idx = 0
 
     if idx < len(focusable_nodes):
       self.focus_element(focusable_nodes[idx])
-      self.browser.focus_content()
+      self.tab.browser.focus_content()
     else:
       self.focus_element(None)
-      self.browser.focus_addressbar()
+      self.tab.browser.focus_addressbar()
     self.set_needs_render()
 
-  def enter(self):
-    if not self.focus: return
-    if self.js.dispatch_event("click", self.focus): return
-    self.activate_element(self.focus)
+  def focus_element(self, node):
+    if node and node != self.tab.focus:
+      self.needs_focus_scroll = True
+    if self.tab.focus:
+      self.tab.focus.is_focused = False
+    if self.tab.focused_frame and self.tab.focused_frame != self:
+      self.tab.focused_frame.set_needs_render()
+    self.tab.focus = node
+    self.tab.focused_frame = self
+    if node:
+      node.is_focused = True
+    self.set_needs_render()
 
   def activate_element(self, elt):
     if elt.tag == "input":
@@ -881,15 +776,271 @@ class Tab:
           return
         elt = elt.parent
 
-  def focus_element(self, node):
-    if node and node != self.focus:
-      self.needs_focus_scroll = True
+  def submit_form(self, elt):
+    if self.js.dispatch_event("submit", elt, self.window_id): return
+    inputs = [node for node in tree_to_list(elt, [])
+              if isinstance(node, Element)
+              and node.tag == "input"
+              and "name" in node.attributes]
+    body = ""
+    for input in inputs:
+      name = input.attributes["name"]
+      value = input.attributes.get("value", "")
+      name = urllib.parse.quote(name)
+      value = urllib.parse.quote(value)
+      body += "&" + name + "=" + value
+    body = body[1:]
+
+    url = self.url.resolve(elt.attributes["action"])
+    self.load(url, body)
+
+  def keypress(self, char):
+    if self.tab.focus and self.tab.focus.tag == "input":
+      if not "value" in self.tab.focus.attributes:
+        self.activate_element(self.tab.focus)
+      if self.js.dispatch_event("keydown", self.tab.focus, self.window_id): return
+      self.tab.focus.attributes["value"] += char
+      self.set_needs_render()
+ 
+  def scroll_to(self, elt):
+    assert not (self.needs_style or self.needs_layout)
+    objs = [
+      obj for obj in tree_to_list(self.document, [])
+      if obj.node == self.tab.focus
+    ]
+    if not objs: return
+    obj = objs[0]
+
+    if self.scroll < obj.y < self.scroll + self.frame_height:
+      return
+    new_scroll = obj.y - SCROLL_STEP
+    self.scroll = self.clamp_scroll(new_scroll)
+    self.scroll_changed_in_frame = True
+    self.tab.set_needs_paint()
+
+  def click(self, x, y):
+    self.focus_element(None)
+    y += self.scroll
+    loc_rect = skia.Rect.MakeXYWH(x, y, 1, 1)
+    objs = [obj for obj in tree_to_list(self.document, [])
+            if absolute_bounds_for_obj(obj).intersects(loc_rect)]
+    if not objs: return
+    elt = objs[-1].node
+    if elt and self.js.dispatch_event("click", elt, self.window_id): return
+    while elt:
+      if isinstance(elt, Text):
+        pass
+      elif elt.tag == "iframe":
+        abs_bounds = absolute_bounds_for_obj(elt.layout_object)
+        border = dpx(1, elt.layout_object.zoom)
+        new_x = x - abs_bounds.left() - border
+        new_y = y - abs_bounds.top() - border
+        elt.frame.click(new_x, new_y)
+        return
+      elif is_focusable(elt):
+        self.focus_element(elt)
+        self.activate_element(elt)
+        self.set_needs_render()
+        return
+      elt = elt.parent
+
+  def scrolldown(self):
+    self.scroll = self.clamp_scroll(self.scroll + SCROLL_STEP)
+    self.scroll_changed_in_frame = True
+
+  def clamp_scroll(self, scroll):
+    height = math.ceil(self.document.height + 2*VSTEP)
+    maxscroll = height - self.frame_height
+    return max(0, min(scroll, maxscroll))
+
+class Tab:
+  def __init__(self, browser, tab_height):
+    self.url = ""
+    self.tab_height = tab_height
+    self.history = []
+    self.focus = None
+    self.focused_frame = None
+    self.needs_raf_callbacks = False
+    self.needs_accessibility = False
+    self.needs_paint = False
+    self.dark_mode = browser.dark_mode
+    
+    self.accessibility_is_on = False
+    self.accessibility_tree = None
+    self.has_spoken_document = False
+    self.accessibility_focus = None
+    self.loaded = False
+
+    self.browser = browser
+    self.task_runner = TaskRunner(self)
+    self.task_runner.start_thread()
+
+    self.composited_updates = []
+    self.zoom = 1.0
+
+    self.root_frame = None
+    self.window_id_to_frame = {}
+    self.origin_to_js = {}
+
+  def go_back(self):
+    if len(self.history) > 1:
+      self.history.pop()
+      back = self.history.pop()
+      self.load(back)
+
+  def load(self, url, payload=None):
+    self.loaded = False
+    self.history.append(url)
+    self.task_runner.clear_pending_tasks()
+    self.root_frame = Frame(self, None, None)
+    self.root_frame.load(url, payload)
+    self.root_frame.frame_width = WIDTH
+    self.root_frame.frame_height = self.tab_height
+    self.loaded = True
+
+  def set_needs_render_all_frames(self):
+    for id, frame in self.window_id_to_frame.items():
+      frame.set_needs_render()
+
+  def set_needs_paint(self):
+    self.needs_paint = True
+    self.browser.set_needs_animation_frame(self)
+
+  def render(self):
+    self.browser.measure.time('render')
+
+    for id, frame in self.window_id_to_frame.items():
+      if frame.loaded:
+        frame.render()
+
+    if self.needs_accessibility:
+      self.accessibility_tree = AccessibilityNode(self.root_frame.nodes)
+      self.accessibility_tree.build()
+      self.needs_accessibility = False
+      self.needs_paint = True
+
+    if self.needs_paint:
+      self.display_list = []
+      paint_tree(self.root_frame.document, self.display_list)
+      self.needs_paint = False
+
+    self.browser.measure.stop('render')
+  
+  def run_animation_frame(self, scroll):
+    if not self.root_frame.scroll_changed_in_frame:
+      self.root_frame.scroll = scroll
+
+    needs_composite = False
+    for (window_id, frame) in self.window_id_to_frame.items():
+      if not frame.loaded:
+        continue
+
+      self.browser.measure.time('script-runRAFHandlers')
+      frame.js.dispatch_RAF(frame.window_id)
+      self.browser.measure.stop('script-runRAFHandlers')
+
+      for node in tree_to_list(frame.nodes, []):
+        for (property_name, animation) in node.animations.items():
+          value = animation.animate()
+          if value:
+            node.style[property_name] = value
+            self.composited_updates.append(node)
+            self.set_needs_paint()
+
+      needs_composite = frame.needs_style or frame.needs_layout
+
+    self.render()
+
+    if self.focus and self.focused_frame.needs_focus_scroll:
+      self.focused_frame.scroll_to(self.focus)
+      self.focused_frame.needs_focus_scroll = False
+
+    for (window_id, frame) in self.window_id_to_frame.items():
+      if frame == self.root_frame: continue
+      if frame.scroll_changed_in_frame:
+        needs_composite = True
+        frame.scroll_changed_in_frame = False
+
+    scroll = None
+    if self.root_frame.scroll_changed_in_frame:
+      scroll = self.root_frame.scroll
+
+    composited_updates = None
+    if not needs_composite:
+      composited_updates = {}
+      for node in self.composited_updates:
+        composited_updates[node] = node.blend_op
+    self.composited_updates = []
+    
+    root_frame_focused = not self.focused_frame or self.focused_frame == self.root_frame
+    commit_data = CommitData(
+      self.root_frame.url,
+      scroll,
+      root_frame_focused,
+      math.ceil(self.root_frame.document.height),
+      self.display_list,
+      composited_updates,
+      self.accessibility_tree,
+      self.focus
+    )
+    self.display_list = None
+    self.root_frame.scroll_changed_in_frame = False
+
+    self.browser.commit(self, commit_data)
+ 
+  def advance_tab(self):
+    frame = self.focused_frame or self.root_frame
+    frame.advance_tab()
+
+  def scrolldown(self):
+    frame = self.focused_frame or self.root_frame
+    frame.scrolldown()
+    self.needs_accessibility = True
+    self.set_needs_paint()
+
+  def zoom_by(self, increment):
+    if increment > 0:
+      self.zoom *= 1.1
+      self.scroll *= 1.1
+    else:
+      self.zoom *= 1/1.1
+      self.scroll *= 1/1.1
+    self.scroll_changed_in_tab = True
+    self.set_needs_render_all_frames()
+  
+  def reset_zoom(self):
+    self.scroll /= self.zoom
+    self.zoom = 1
+    self.scroll_changed_in_tab = True
+    self.set_needs_render_all_frames()
+
+  def set_dark_mode(self, val):
+    self.dark_mode = val
+    self.set_needs_render_all_frames()
+
+  def keypress(self, char):
+    frame = self.focused_frame
+    if not frame: frame = self.root_frame
+    frame.keypress(char)
+
+  def enter(self):
     if self.focus:
-      self.focus.is_focused = False
-    self.focus = node
-    if node:
-      node.is_focused = True
-    self.set_needs_render()
+      frame = self.focused_frame or self.root_frame
+      frame.activate_element(self.focus)
+
+  def click(self, x, y):
+    self.render()
+    self.root_frame.click(x, y)
+
+  def get_js(self, url):
+    origin = url.origin()
+    if origin not in self.origin_to_js:
+      self.origin_to_js[origin] = JSContext(self, origin)
+    return self.origin_to_js[origin]
+  
+  def post_message(self, message, target_window_id):
+    frame = self.window_id_to_frame[target_window_id]
+    frame.js.dispatch_post_message(message, target_window_id)
 
   def __repr__(self):
     return "Tab(history={})".format(self.history)
@@ -1018,7 +1169,7 @@ class Chrome:
         if self.tab_rect(i).contains(x, y):
           self.browser.set_active_tab(tab)
           active_tab = self.browser.active_tab
-          task = Task(active_tab.set_needs_render)
+          task = Task(active_tab.set_needs_render_all_frames)
           active_tab.task_runner.schedule_task(task)
           break
 
@@ -1043,8 +1194,9 @@ class Chrome:
     self.address_bar = ""
 
 class AccessibilityNode:
-  def __init__(self, node):
+  def __init__(self, node, parent=None):
     self.node = node
+    self.parent = parent
     self.children = []
     self.text = ""
     self.bounds = self.compute_bounds()
@@ -1063,6 +1215,10 @@ class AccessibilityNode:
         self.role = "textbox"
       elif node.tag == "button":
         self.role = "button"
+      elif node.tag == "img":
+        self.role = "image"
+      elif node.tag == "iframe":
+        self.role = "iframe"
       elif node.tag == "html":
         self.role = "document"
       elif is_focusable(node):
@@ -1090,6 +1246,13 @@ class AccessibilityNode:
       self.text = "Input box: " + value
     elif self.role == "button":
       self.text = "Button"
+    elif self.role == "image":
+      if "alt" in self.node.attributes:
+        self.text = "Image: " + self.node.attributes["alt"]
+      else:
+        self.text = "Image"
+    elif self.role == "iframe":
+      self.text = "Child document"
     elif self.role == "link":
       self.text = "Link"
     elif self.role == "alert":
@@ -1101,7 +1264,10 @@ class AccessibilityNode:
       self.text += " is focused"
 
   def build_internal(self, child_node):
-    child = AccessibilityNode(child_node)
+    if isinstance(child_node, Element) and child_node.tag == "iframe" and child_node.frame and child_node.frame.loaded:
+      child = FrameAccessibilityNode(child_node, self)
+    else:
+      child = AccessibilityNode(child_node, self)
     if child.role != "none":
       self.children.append(child)
       child.build()
@@ -1109,6 +1275,23 @@ class AccessibilityNode:
       for grandchild_node in child_node.children:
         self.build_internal(grandchild_node)
   
+  def map_to_parent(self, rect):
+    pass
+
+  def absolute_bounds(self):
+    abs_bounds = []
+    for bound in self.bounds:
+      abs_bound = bound.makeOffset(0.0, 0.0)
+      if isinstance(self, FrameAccessibilityNode):
+        obj = self.parent
+      else:
+        obj = self
+      while obj:
+        obj.map_to_parent(abs_bound)
+        obj = obj.parent
+      abs_bounds.append(abs_bound)
+    return abs_bounds
+
   def compute_bounds(self):
     if self.node.layout_object:
       return [absolute_bounds_for_obj(self.node.layout_object )]
@@ -1147,6 +1330,31 @@ class AccessibilityNode:
     return "AccessibilityNode(node={} role={} text={} bounds={}".format(
         str(self.node), self.role, self.text, self.bounds
       )
+
+class FrameAccessibilityNode(AccessibilityNode):
+  def __init__(self, node, parent=None):
+    super().__init__(node, parent)
+    self.scroll = self.node.frame.scroll
+    self.zoom = self.node.layout_object.zoom
+
+  def build(self):
+    self.build_internal(self.node.frame.nodes)
+
+  def hit_test(self, x, y):
+    bounds = self.bounds[0]
+    if not bounds.contains(x, y): return
+    new_x = x - bounds.left() - dpx(1, self.zoom)
+    new_y = y - bounds.top() - dpx(1, self.zoom) + self.scroll
+    node = self
+    for child in self.children:
+      res = child.hit_test(new_x, new_y)
+      if res: node = res
+    return node
+  
+  def map_to_parent(self, rect):
+    bounds = self.bounds[0]
+    rect.offset(bounds.left(), bounds.top() - self.scroll)
+    rect.intersect(bounds)
 
 def is_focusable(node):
   if get_tabindex(node) < 0:

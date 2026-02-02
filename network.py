@@ -53,10 +53,8 @@ class URL:
       s = ctx.wrap_socket(s, server_hostname=self.host)
 
     method = "POST" if payload else "GET"
-    request = "{} {} HTTP/1.0\r\n".format(method, self.path)
-    request += "Host: {}\r\n".format(self.host)
-    request += "Connection: close\r\n"
-
+    body = "{} {} HTTP/1.0\r\n".format(method, self.path)
+    body += "Host: {}\r\n".format(self.host)
     if self.host in COOKIE_JAR:
       cookie, params = COOKIE_JAR[self.host]
       allow_cookie = True
@@ -64,23 +62,25 @@ class URL:
         if method != "GET":
           allow_cookie = self.host == referrer.host
       if allow_cookie:
-        request += "Cookie: {}\r\n".format(cookie)
+        body += "Cookie: {}\r\n".format(cookie)
 
     if payload:
       content_length = len(payload.encode("utf8"))
-      request += "Content-Length: {}\r\n".format(content_length)
+      body += "Content-Length: {}\r\n".format(content_length)
 
-    request += "\r\n"
-    if payload: request += payload
-    s.send(request.encode("utf8"))
-    response = s.makefile("r", encoding="utf8", newline="\r\n")
+    body += "\r\n"
+    if payload: body += payload
 
-    statusline = response.readline()
+    s.send(body.encode("utf8"))
+
+    response = s.makefile("b")
+
+    statusline = response.readline().decode("utf8")
     version, status, explanation = statusline.split(" ", 2)
 
     response_headers = {}
     while True:
-      line = response.readline()
+      line = response.readline().decode("utf8")
       if line == "\r\n": break
       header, value = line.split(":", 1)
       response_headers[header.casefold()] = value.strip()
@@ -101,9 +101,9 @@ class URL:
     assert "transfer-encoding" not in response_headers
     assert "content-encoding" not in response_headers
 
-    content = response.read()
+    body = response.read()
     s.close()
-    return response_headers, content
+    return response_headers, body
   
   def origin(self):
     return self.scheme + "://" + self.host + ":" + str(self.port)

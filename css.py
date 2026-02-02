@@ -13,9 +13,10 @@ class CSSParser:
       self.i += 1
 
   def literal(self, literal):
-    if not (self.i < len(self.s) and self.s[self.i] == literal):
-      raise Exception("Parsing Error")
-    self.i += 1
+    if self.i < len(self.s) and self.s[self.i] == literal:
+      self.i += 1
+      return True
+    return False
 
   def word(self):
     start = self.i
@@ -176,7 +177,7 @@ def cascade_priority(rule):
   media, selector, body = rule
   return selector.priority
 
-def style(node, rules, tab):
+def style(node, rules, frame):
   old_style = node.style
   node.style = {}
   for property, default_value in INHERITED_PROPERTIES.items():
@@ -186,7 +187,7 @@ def style(node, rules, tab):
       node.style[property] = default_value  
   for media, selector, body in rules:
     if media:
-      if (media == "dark") != tab.dark_mode: continue
+      if (media == "dark") != frame.tab.dark_mode: continue
     if not selector.matches(node): continue
     for property, value in body.items():
       node.style[property] = value
@@ -207,7 +208,7 @@ def style(node, rules, tab):
     transitions = diff_styles(old_style, node.style)
     for property, (old_value, new_value, num_frames) in transitions.items():
       if property == "opacity":
-        tab.set_needs_render()
+        frame.set_needs_render()
         animation = NumericAnimation(
           old_value, new_value, num_frames
         )
@@ -215,7 +216,7 @@ def style(node, rules, tab):
         node.style[property] = animation.animate()
 
   for child in node.children:
-    style(child, rules, tab)
+    style(child, rules, frame)
 
 def parse_transition(value):
   properties = {}

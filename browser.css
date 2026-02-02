@@ -38,3 +38,5 @@ a:focus { outline: 2px solid black; }
   div:focus { outline: 2px solid white; }
   a:focus { outline: 2px solid white; }
 }
+
+iframe { outline: 1px solid black; }

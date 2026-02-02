@@ -38,6 +38,14 @@ def parse_blend_mode(blend_mode_str):
   else:
     return skia.BlendMode.kSrcOver
 
+def parse_image_rendering(quality):
+  if quality == "high-quality":
+    return skia.SamplingOptions(skia.CubicResampler.Mitchell())
+  elif quality == "crisp-edges":
+    return skia.SamplingOptions(skia.FilterMode.kNearest, skia.MipmapMode.kNone)
+  else:
+    return skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kLinear)
+
 def get_font(size, weight, style):
   key = (weight, style)
   if key not in FONTS:
@@ -54,6 +62,19 @@ def get_font(size, weight, style):
     font = skia.Typeface('Arial', style_info)
     FONTS[key] = font
   return skia.Font(FONTS[key], size)
+
+def font(style, zoom):
+  from layout import dpx
+
+  weight = style["font-weight"]
+  variant = style["font-style"]
+  size = None
+  try:
+    size = float(style["font-size"][:-2]) * 0.75
+  except:
+    size = 16 
+  font_size = dpx(size, zoom)
+  return get_font(font_size, weight, variant)
 
 def linespace(font):
   metrics = font.getMetrics()
@@ -270,8 +291,20 @@ class DrawOutline(PaintCommand):
   def __repr__(self):
     return "DrawOutline(top={} left={} bottom={} right={} border_color={} thickness={})".format(
       self.rect.top(), self.rect.left(), self.rect.bottom(), self.rect.right(), self.color, self.thickness
-    )   
+    )
+  
+class DrawImage(PaintCommand):
+  def __init__(self, image, rect, quality):
+    super().__init__(rect)
+    self.image = image
+    self.quality = parse_image_rendering(quality)
 
+  def execute(self, canvas):
+    canvas.drawImageRect(self.image, self.rect, self.quality)
+
+  def __repr__(self):
+    return "DrawImage(rect={})".format(self.rect)
+  
 class Blend(VisualEffect):
   def __init__(self, opacity, blend_mode, node, children):
     super().__init__(skia.Rect.MakeEmpty(), children, node)
