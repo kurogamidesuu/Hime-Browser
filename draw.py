@@ -63,18 +63,18 @@ def get_font(size, weight, style):
     FONTS[key] = font
   return skia.Font(FONTS[key], size)
 
-def font(style, zoom):
+def font(css_style, zoom, notify):
   from layout import dpx
 
-  weight = style["font-weight"]
-  variant = style["font-style"]
+  weight = css_style["font-weight"].read(notify)
+  style = css_style["font-style"].read(notify)
   size = None
   try:
-    size = float(style["font-size"][:-2]) * 0.75
-  except (ValueError, TypeError):
+    size = float(css_style["font-size"].read(notify)[:-2]) * 0.75
+  except:
     size = 16
   font_size = dpx(size, zoom)
-  return get_font(font_size, weight, variant)
+  return get_font(font_size, weight, style)
 
 def linespace(font):
   metrics = font.getMetrics()
@@ -99,10 +99,14 @@ def paint_outline(node, cmds, rect, zoom):
   from layout import dpx
   from css import parse_outline
 
-  outline = parse_outline(node.style.get("outline"))
+  outline = parse_outline(node.style["outline"].get())
   if not outline: return
   thickness, color = outline
   cmds.append(DrawOutline(rect, color, dpx(thickness, zoom)))
+
+def DrawCursor(elt, offset):
+    x = elt.x.get() + offset
+    return DrawLine(x, elt.y.get(), x, elt.y.get() + elt.height.get(), "red", 1)
 
 class PaintCommand:
   def __init__(self, rect):

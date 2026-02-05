@@ -1,8 +1,9 @@
 import dukpy
 import threading
-from css import CSSParser
+from css import CSSParser, dirty_style
 from dom import tree_to_list, HTMLParser
 from task import Task
+from layout import BlockLayout, IframeLayout, ImageLayout
 
 EVENT_DISPATCH_JS = \
   "new window.Node(dukpy.handle)" + \
@@ -73,6 +74,18 @@ class JSContext:
     attr = elt.attributes.get(attr, None)
     return attr if attr else ""
   
+  def setAttribute(self, handle, attr, value, window_id):
+    frame = self.tab.window_id_to_frame[window_id]
+    self.throw_if_cross_origin(frame)
+    elt = self.handle_to_node[handle]
+    elt.attributes[attr] = value
+    obj = elt.layout_object
+    if isinstance(obj, IframeLayout) or isinstance(obj, ImageLayout):
+      if attr == "width" or attr == "height":
+        obj.width.mark()
+        obj.height.mark()
+    self.tab.set_needs_render_all_frames()
+
   def dispatch_event(self, type, elt, window_id):
     handle = self.node_to_handle.get(elt, -1)
     code = self.wrap(EVENT_DISPATCH_JS, window_id)
@@ -90,6 +103,11 @@ class JSContext:
     elt.children = new_nodes
     for child in elt.children:
       child.parent = elt
+    obj = elt.layout_object
+    if obj:
+      while not isinstance(obj, BlockLayout):
+        obj = obj.parent
+      obj.children.mark()
     frame.set_needs_render()
 
   def XMLHttpRequest_send(self, method, url, body, isasync, handle, window_id):
@@ -138,14 +156,8 @@ class JSContext:
     self.throw_if_cross_origin(frame)
     elt = self.handle_to_node[handle]
     elt.attributes["style"] = s
+    dirty_style(elt)
     frame.set_needs_render()
-
-  def setAttribute(self, handle, attr, value, window_id):
-    frame = self.tab.window_id_to_frame[window_id]
-    self.throw_if_cross_origin(frame)
-    elt = self.handle_to_node[handle]
-    elt.attributes[attr] = value
-    self.tab.set_needs_render_all_frames()
   
   def add_window(self, frame):
     code = "var window_{} = new Window({});".format(frame.window_id, frame.window_id)

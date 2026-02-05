@@ -40,3 +40,13 @@ NAMED_COLORS = {
   "orange": "#ffa500",
   "orangered": "#ff4500",
 }
+
+CSS_PROPERTIES = {
+  "font-size": "inherit", "font-weight": "inherit",
+  "font-style": "inherit", "color": "inherit",
+  "opacity": "1.0", "transition": "",
+  "transform": "none", "mix-blend-mode": None,
+  "border-radius": "0px", "overflow": "visible",
+  "outline": "none", "background-color": "transparent",
+  "image-rendering": "auto",
+}

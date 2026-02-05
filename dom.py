@@ -1,9 +1,31 @@
+def print_tree(node, indent=0):
+  from layout import ProtectedField
+
+  print(' ' * indent, node)
+  children = node.children
+  if isinstance(children, ProtectedField):
+    children = children.get()
+  for child in children:
+    print_tree(child, indent + 2)
+
+def tree_to_list(tree, list):
+  from layout import ProtectedField
+
+  list.append(tree)
+  children = tree.children
+  if isinstance(children, ProtectedField):
+    children = children.get()
+
+  for child in children:
+    tree_to_list(child, list)
+  return list
+
 class Text:
   def __init__(self, text, parent):
     self.text = text
     self.children = []
     self.parent = parent
-    self.style = {}
+    self.style = None
     self.is_focused = False
     self.animations = {}
     self.layout_object = None
@@ -17,7 +39,7 @@ class Element:
     self.attributes = attributes
     self.children = []
     self.parent = parent
-    self.style = {}
+    self.style = None
     self.is_focused = False
     self.animations = {}
     self.layout_object = None
@@ -121,14 +143,3 @@ class HTMLParser:
         self.add_tag("/head")
       else:
         break
-
-def print_tree(node, indent=0):
-  print(" " * indent, node)
-  for child in node.children:
-    print_tree(child, indent+2)
-
-def tree_to_list(tree, out):
-  out.append(tree)
-  for child in tree.children:
-    tree_to_list(child, out)
-  return out

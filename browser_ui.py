@@ -5,10 +5,10 @@ import math
 import threading
 import OpenGL.GL
 from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES, BROKEN_IMAGE
-from dom import HTMLParser, Text, Element, tree_to_list, print_tree
-from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj
-from layout import DocumentLayout, paint_tree, get_font, add_parent_pointers, dpx
-from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute
+from dom import HTMLParser, Text, Element, tree_to_list
+from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj, dirty_style
+from layout import DocumentLayout, add_parent_pointers, dpx, paint_tree, BlockLayout
+from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute, get_font
 from network import URL
 from js import JSContext
 from task import TaskRunner, Task, MeasureTime, CommitData
@@ -675,6 +675,7 @@ class Frame:
       task = Task(iframe.frame.load, document_url)
       self.tab.task_runner.schedule_task(task)
 
+    self.document = DocumentLayout(self.nodes, self)
     self.set_needs_render()
     self.loaded = True
   
@@ -689,7 +690,6 @@ class Frame:
       self.needs_style = False
 
     if self.needs_layout:
-      self.document = DocumentLayout(self.nodes, self)
       self.document.layout(self.frame_width, self.tab.zoom)
       self.tab.needs_accessibility = True
       self.needs_paint = True
@@ -725,12 +725,14 @@ class Frame:
       self.needs_focus_scroll = True
     if self.tab.focus:
       self.tab.focus.is_focused = False
+      dirty_style(self.tab.focus)
     if self.tab.focused_frame and self.tab.focused_frame != self:
       self.tab.focused_frame.set_needs_render()
     self.tab.focus = node
     self.tab.focused_frame = self
     if node:
       node.is_focused = True
+      dirty_style(node)
     self.set_needs_render()
 
   def activate_element(self, elt):
@@ -772,6 +774,22 @@ class Frame:
       if self.js.dispatch_event("keydown", self.tab.focus, self.window_id): return
       self.tab.focus.attributes["value"] += char
       self.set_needs_render()
+    elif self.tab.focus and "contenteditable" in self.tab.focus.attributes:
+      text_nodes = [
+        t for t in tree_to_list(self.tab.focus, [])
+        if isinstance(t, Text)
+      ]
+      if text_nodes:
+        last_text = text_nodes[-1]
+      else:
+        last_text = Text("", self.tab.focus)
+        self.tab.focus.children.append(last_text)
+      last_text.text += char
+      obj = self.tab.focus.layout_object
+      while not isinstance(obj, BlockLayout):
+        obj = obj.parent
+      obj.children.mark()
+      self.set_needs_render()
  
   def scroll_to(self, elt):
     assert not (self.needs_style or self.needs_layout)
@@ -782,9 +800,9 @@ class Frame:
     if not objs: return
     obj = objs[0]
 
-    if self.scroll < obj.y < self.scroll + self.frame_height:
+    if self.scroll < obj.y.get() < self.scroll + self.frame_height:
       return
-    new_scroll = obj.y - SCROLL_STEP
+    new_scroll = obj.y.get() - SCROLL_STEP
     self.scroll = self.clamp_scroll(new_scroll)
     self.scroll_changed_in_frame = True
     self.tab.set_needs_paint()
@@ -803,7 +821,7 @@ class Frame:
         pass
       elif elt.tag == "iframe":
         abs_bounds = absolute_bounds_for_obj(elt.layout_object)
-        border = dpx(1, elt.layout_object.zoom)
+        border = dpx(1, elt.layout_object.zoom.get())
         new_x = x - abs_bounds.left() - border
         new_y = y - abs_bounds.top() - border
         elt.frame.click(new_x, new_y)
@@ -820,9 +838,7 @@ class Frame:
     self.scroll_changed_in_frame = True
 
   def clamp_scroll(self, scroll):
-    if not self.document:
-      return 0
-    height = math.ceil(self.document.height + 2*VSTEP)
+    height = math.ceil(self.document.height.get() + 2*VSTEP)
     maxscroll = height - self.frame_height
     return max(0, min(scroll, maxscroll))
 
@@ -894,7 +910,9 @@ class Tab:
 
     if self.needs_paint:
       self.display_list = []
+      self.browser.measure.time('paint')
       paint_tree(self.root_frame.document, self.display_list)
+      self.browser.measure.stop('paint')
       self.needs_paint = False
 
     self.browser.measure.stop('render')
@@ -916,7 +934,7 @@ class Tab:
         for (property_name, animation) in node.animations.items():
           value = animation.animate()
           if value:
-            node.style[property_name] = value
+            node.style[property_name].set(value)
             self.composited_updates.append(node)
             self.set_needs_paint()
 
@@ -950,7 +968,7 @@ class Tab:
       self.root_frame.url,
       scroll,
       root_frame_focused,
-      math.ceil(self.root_frame.document.height),
+      math.ceil(self.root_frame.document.height.get()),
       self.display_list,
       composited_updates,
       self.accessibility_tree,
@@ -978,11 +996,18 @@ class Tab:
     else:
       self.zoom *= 1/1.1
       self.root_frame.scroll *= 1/1.1
+      
+    for id, frame in self.window_id_to_frame.items():
+      frame.document.zoom.mark()
     self.set_needs_render_all_frames()
   
   def reset_zoom(self):
     self.root_frame.scroll /= self.zoom
     self.zoom = 1
+
+    for id, frame in self.window_id_to_frame.items():
+      frame.document.zoom.mark()
+    self.scroll_changed_in_tab = True
     self.set_needs_render_all_frames()
 
   def set_dark_mode(self, val):
@@ -1272,12 +1297,12 @@ class AccessibilityNode:
     inline = self.node.parent
     bounds = []
     while not inline.layout_object: inline = inline.parent
-    for line in inline.layout_object.children:
+    for line in inline.layout_object.children.get():
       line_bounds = skia.Rect.MakeEmpty()
       for child in line.children:
         if child.node.parent == self.node:
           line_bounds.join(skia.Rect.MakeXYWH(
-            child.x, child.y, child.width, child.height
+            child.x.get(), child.y.get(), child.width.get(), child.height.get()
           ))
       bounds.append(line_bounds)
     return bounds
@@ -1328,11 +1353,11 @@ class FrameAccessibilityNode(AccessibilityNode):
     rect.intersect(bounds)
 
 def is_focusable(node):
-  if not isinstance(node, Element):
-    return False
-  if get_tabindex(node) < 0:
+  if get_tabindex(node) <= 0:
     return False
   elif "tabindex" in node.attributes:
+    return True
+  elif "contenteditable" in node.attributes:
     return True
   else:
     return node.tag in ["input", "button", "a"]

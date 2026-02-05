@@ -1,6 +1,6 @@
 import skia
 from dom import Element
-from constants import INHERITED_PROPERTIES, REFRESH_RATE_SEC
+from constants import INHERITED_PROPERTIES, REFRESH_RATE_SEC, CSS_PROPERTIES
 from draw import NumericAnimation
 
 class CSSParser:
@@ -178,42 +178,54 @@ def cascade_priority(rule):
   return selector.priority
 
 def style(node, rules, frame):
-  old_style = node.style
-  node.style = {}
-  for property, default_value in INHERITED_PROPERTIES.items():
-    if node.parent:
-      node.style[property] = node.parent.style[property]
-    else:
-      node.style[property] = default_value  
-  for media, selector, body in rules:
-    if media:
-      if (media == "dark") != frame.tab.dark_mode: continue
-    if not selector.matches(node): continue
-    for property, value in body.items():
-      node.style[property] = value
-  if isinstance(node, Element) and "style" in node.attributes:
-    pairs = CSSParser(node.attributes["style"]).body()
-    for property, value in pairs.items():
-      node.style[property] = value
-  if node.style["font-size"].endswith("%"):
-    if node.parent:
-      parent_font_size = node.parent.style["font-size"]
-    else:
-      parent_font_size = INHERITED_PROPERTIES["font-size"]
-    node_pct = float(node.style["font-size"][:-1]) / 100
-    parent_px = float(parent_font_size[:-2])
-    node.style["font-size"] = str(node_pct * parent_px) + "px"
+  if not node.style:
+    init_style(node)
+  needs_style = any([field.dirty for field in node.style.values()])
+  if needs_style:
+    old_style = dict([
+      (property, field.value)
+      for property, field in node.style.items()
+    ])
+    new_style = CSS_PROPERTIES.copy()
+    for property, default_value in INHERITED_PROPERTIES.items():
+      if node.parent:
+        parent_field = node.parent.style[property]
+        parent_value = parent_field.read(notify=node.style[property])
+        new_style[property] = parent_value
+      else:
+        new_style[property] = default_value
+    for media, selector, body in rules:
+      if media:
+        if (media == "dark") != frame.tab.dark_mode: continue
+      if not selector.matches(node): continue
+      for property, value in body.items():
+        new_style[property] = value
+    if isinstance(node, Element) and "style" in node.attributes:
+      pairs = CSSParser(node.attributes["style"]).body()
+      for property, value in pairs.items():
+        new_style[property] = value
+    if new_style["font-size"].endswith("%"):
+      if node.parent:
+        parent_field = node.parent.style["font-size"]
+        parent_font_size = parent_field.read(notify=node.style["font-size"])
+      else:
+        parent_font_size = INHERITED_PROPERTIES["font-size"]
+      node_pct = float(new_style["font-size"][:-1]) / 100
+      parent_px = float(parent_font_size[:-2])
+      new_style["font-size"] = str(node_pct * parent_px) + "px"
 
-  if old_style:
-    transitions = diff_styles(old_style, node.style)
-    for property, (old_value, new_value, num_frames) in transitions.items():
-      if property == "opacity":
-        frame.set_needs_render()
-        animation = NumericAnimation(
-          old_value, new_value, num_frames
-        )
-        node.animations[property] = animation
-        node.style[property] = animation.animate()
+    if old_style:
+      transitions = diff_styles(old_style, new_style)
+      for property, (old_value, new_value, num_frames) in transitions.items():
+        if property == "opacity":
+          frame.set_needs_render()
+          animation = NumericAnimation(
+            old_value, new_value, num_frames
+          )
+          node.animations[property] = animation
+          node.style[property] = animation.animate()
+    for property, field in node.style.items():
+      field.set(new_style[property])
 
   for child in node.children:
     style(child, rules, frame)
@@ -260,11 +272,11 @@ def map_translation(rect, translation, reversed=False):
 
 def absolute_bounds_for_obj(obj):
   rect = skia.Rect.MakeXYWH(
-    obj.x, obj.y, obj.width, obj.height
+    obj.x.get(), obj.y.get(), obj.width.get(), obj.height.get()
   )
   cur = obj.node
   while cur:
-    rect = map_translation(rect, parse_transform(cur.style.get("transform", "")))
+    rect = map_translation(rect, parse_transform(cur.style["transform"].get()))
     cur = cur.parent
   return rect
 
@@ -274,5 +286,17 @@ def parse_outline(outline_str):
   if len(values) != 3: return None
   if values[1] != "solid": return None
   return int(values[0][:-2]), values[2]
+
+def dirty_style(node):
+  for property, value in node.style.items():
+    value.mark()
+
+def init_style(node):
+  from layout import ProtectedField
+  node.style = dict([
+    (property, ProtectedField(node, property, None,
+      [node.parent.style[property]] if node.parent and property in INHERITED_PROPERTIES else []))
+    for property in CSS_PROPERTIES
+  ])
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
