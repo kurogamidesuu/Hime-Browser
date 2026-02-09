@@ -1,5 +1,7 @@
 import skia
 
+MAX_AGE = 5
+
 WIDTH, HEIGHT = 800, 600
 HSTEP, VSTEP = 13, 18
 SCROLL_STEP = 100

@@ -1,3 +1,5 @@
+import html
+
 def print_tree(node, indent=0):
   from layout import ProtectedField
 
@@ -82,7 +84,7 @@ class HTMLParser:
   
   def add_text(self, text):
     if text.isspace(): return
-    text = text.replace("&lt;", "<").replace("&gt;", ">")
+    text = html.unescape(text)
     self.implicit_tags(None)
     parent = self.unfinished[-1]
     node = Text(text, parent)
