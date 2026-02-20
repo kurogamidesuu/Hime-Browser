@@ -7,6 +7,7 @@ from browser_ui import Browser
 def mainloop(browser):
   event = sdl2.SDL_Event()
   ctrl_down = False
+  pending_resize = None
   while True:
     while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
       if event.type == sdl2.SDL_QUIT:
@@ -14,6 +15,9 @@ def mainloop(browser):
         sdl2.SDL_Quit()
         sys.exit()
         break
+      elif event.type == sdl2.SDL_WINDOWEVENT:
+        if event.window.event == sdl2.SDL_WINDOWEVENT_RESIZED:
+          pending_resize = (event.window.data1, event.window.data2)
       elif event.type == sdl2.SDL_MOUSEBUTTONUP:
         browser.handle_click(event.button)
       elif event.type == sdl2.SDL_MOUSEMOTION:
@@ -65,7 +69,12 @@ def mainloop(browser):
         browser.handle_scroll_with_mouse(scroll_y)
       elif event.type == sdl2.SDL_TEXTINPUT and not ctrl_down:
         browser.handle_key(event.text.text.decode('utf8'))
-    
+
+    if pending_resize is not None:
+      width, height = pending_resize
+      browser.handle_resize(width, height)
+      pending_resize = None
+
     browser.composite_raster_and_draw()
     browser.schedule_animation_frame()
 

@@ -7,7 +7,7 @@ import OpenGL.GL
 from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES, BROKEN_IMAGE
 from dom import HTMLParser, Text, Element, tree_to_list
 from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj, dirty_style
-from layout import DocumentLayout, add_parent_pointers, dpx, paint_tree, BlockLayout
+from layout import DocumentLayout, add_parent_pointers, dpx, paint_tree, BlockLayout, ProtectedField
 from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute, get_font
 from network import URL
 from js import JSContext
@@ -15,13 +15,15 @@ from task import TaskRunner, Task, MeasureTime, CommitData
 
 class Browser:
   def __init__(self):
+    self.width = WIDTH
+    self.height = HEIGHT
     self.chrome = Chrome(self)
 
     self.sdl_window = sdl2.SDL_CreateWindow(b"Browser",
       sdl2.SDL_WINDOWPOS_CENTERED,
       sdl2.SDL_WINDOWPOS_CENTERED,
-      WIDTH, HEIGHT,
-      sdl2.SDL_WINDOW_SHOWN | sdl2.SDL_WINDOW_OPENGL)
+      self.width, self.height,
+      sdl2.SDL_WINDOW_SHOWN | sdl2.SDL_WINDOW_OPENGL | sdl2.SDL_WINDOW_RESIZABLE)
     
     sdl2.SDL_GL_SetAttribute(sdl2.SDL_GL_CONTEXT_MAJOR_VERSION, 3)
     sdl2.SDL_GL_SetAttribute(sdl2.SDL_GL_CONTEXT_MINOR_VERSION, 2)
@@ -36,7 +38,7 @@ class Browser:
     self.root_surface = skia.Surface.MakeFromBackendRenderTarget(
       self.skia_context,
       skia.GrBackendRenderTarget(
-        WIDTH, HEIGHT, 0, 0,
+        self.width, self.height, 0, 0,
         skia.GrGLFramebufferInfo(
             0, OpenGL.GL.GL_RGBA8)),
         skia.kBottomLeft_GrSurfaceOrigin,
@@ -46,7 +48,7 @@ class Browser:
 
     self.chrome_surface = skia.Surface.MakeRenderTarget(
       self.skia_context, skia.Budgeted.kNo,
-      skia.ImageInfo.MakeN32Premul(WIDTH, math.ceil(self.chrome.bottom))
+      skia.ImageInfo.MakeN32Premul(self.width, math.ceil(self.chrome.bottom))
     )
     assert self.chrome_surface is not None
     
@@ -112,13 +114,6 @@ class Browser:
         self.set_needs_draw()
     self.lock.release()
 
-  def handle_quit(self):
-    self.measure.finish()
-    for tab in self.tabs:
-      tab.task_runner.set_needs_quit()
-    sdl2.SDL_GL_DeleteContext(self.gl_context)
-    sdl2.SDL_DestroyWindow(self.sdl_window)
-
   def clear_data(self):
     self.active_tab_scroll = 0
     self.active_tab_url = None
@@ -126,6 +121,49 @@ class Browser:
     self.composited_layers = []
     self.composited_updates = {}
     self.accessibility_tree = None
+
+  def handle_quit(self):
+    self.measure.finish()
+    for tab in self.tabs:
+      tab.task_runner.set_needs_quit()
+    sdl2.SDL_GL_DeleteContext(self.gl_context)
+    sdl2.SDL_DestroyWindow(self.sdl_window)
+
+  def handle_resize(self, width, height):
+    self.lock.acquire(blocking=True)
+    width = width
+    height = max(height, 10)
+
+    try:
+      self.width = width
+      self.height = height
+
+      OpenGL.GL.glViewport(0, 0, width, height)
+      
+      self.chrome.layout(width)
+
+      self.root_surface = skia.Surface.MakeFromBackendRenderTarget(
+        self.skia_context,
+        skia.GrBackendRenderTarget(
+            width, height, 0, 0,
+            skia.GrGLFramebufferInfo(0, OpenGL.GL.GL_RGBA8)),
+        skia.kBottomLeft_GrSurfaceOrigin,
+        skia.kRGBA_8888_ColorType,
+        skia.ColorSpace.MakeSRGB())
+
+      self.chrome_surface = skia.Surface.MakeRenderTarget(
+          self.skia_context, skia.Budgeted.kNo,
+          skia.ImageInfo.MakeN32Premul(width, math.ceil(self.chrome.bottom))
+      )
+
+      if self.active_tab:
+        self.active_tab.tab_height = height - self.chrome.bottom
+        task = Task(self.active_tab.set_needs_render_all_frames)
+        self.active_tab.task_runner.schedule_task(task)
+
+      self.set_needs_raster()
+    finally:
+      self.lock.release()
 
   def handle_enter(self):
     self.lock.acquire(blocking=True)
@@ -184,7 +222,7 @@ class Browser:
 
   def clamp_scroll(self, scroll):
     height = self.active_tab_height
-    maxscroll = height - (HEIGHT - self.chrome.bottom)
+    maxscroll = height - (self.height - self.chrome.bottom)
     return max(0, min(scroll, maxscroll))
 
   def handle_click(self, e):
@@ -264,7 +302,7 @@ class Browser:
     canvas.restore()
 
     chrome_rect = skia.Rect.MakeLTRB(
-        0, 0, WIDTH, self.chrome.bottom)
+        0, 0, self.width, self.chrome.bottom)
     canvas.save()
     canvas.clipRect(chrome_rect)
     self.chrome_surface.draw(canvas, 0, 0)
@@ -312,7 +350,7 @@ class Browser:
     self.lock.release()
 
   def new_tab_internal(self, url):
-    new_tab = Tab(self, HEIGHT - self.chrome.bottom)
+    new_tab = Tab(self, self.height - self.chrome.bottom)
     self.tabs.append(new_tab)
     self.set_active_tab(new_tab)
     self.schedule_load(url)
@@ -680,6 +718,13 @@ class Frame:
     self.loaded = True
   
   def render(self):
+    if self.parent_frame is None:
+      self.frame_width = self.tab.browser.width
+      self.frame_height = self.tab.tab_height
+      if hasattr(self, "document") and self.document:
+        self.document.width.mark()
+        self.needs_layout = True
+
     if self.needs_style:
       if self.tab.dark_mode:
         INHERITED_PROPERTIES["color"] = "white"
@@ -883,7 +928,7 @@ class Tab:
     self.task_runner.clear_pending_tasks()
     self.root_frame = Frame(self, None, None)
     self.root_frame.load(url, payload)
-    self.root_frame.frame_width = WIDTH
+    self.root_frame.frame_width = self.browser.width
     self.root_frame.frame_height = self.tab_height
     self.loaded = True
 
@@ -1049,8 +1094,11 @@ class Chrome:
 
     self.font = get_font(12, "normal", "roman")
     self.font_height = linespace(self.font)
-
     self.padding = 5
+
+    self.layout(WIDTH)
+
+  def layout(self, width):
     self.tabbar_top = 0
     self.tabbar_bottom = self.font_height + 2*self.padding
 
@@ -1074,7 +1122,7 @@ class Chrome:
     self.address_rect = skia.Rect.MakeLTRB(
       self.back_rect.right() + self.padding,
       self.urlbar_top + self.padding,
-      WIDTH - self.padding,
+      width - self.padding,
       self.urlbar_bottom - self.padding
     )
 
@@ -1094,7 +1142,7 @@ class Chrome:
     else:
       color = "black"
     cmds = []
-    cmds.append(DrawLine(0, self.bottom, WIDTH, self.bottom, color, 1))
+    cmds.append(DrawLine(0, self.bottom, self.browser.width, self.bottom, color, 1))
 
     cmds.append(DrawOutline(self.newtab_rect, color, 1))
     cmds.append(DrawText(
@@ -1118,7 +1166,7 @@ class Chrome:
 
       if tab == self.browser.active_tab:
         cmds.append(DrawLine(0, bounds.bottom(), bounds.left(), bounds.bottom(), color, 1))
-        cmds.append(DrawLine(bounds.right(), bounds.bottom(), WIDTH, bounds.bottom(), color, 1))
+        cmds.append(DrawLine(bounds.right(), bounds.bottom(), self.browser.width, bounds.bottom(), color, 1))
     
     cmds.append(DrawOutline(self.back_rect, color, 1))
     cmds.append(DrawText(
@@ -1297,7 +1345,10 @@ class AccessibilityNode:
     inline = self.node.parent
     bounds = []
     while not inline.layout_object: inline = inline.parent
-    for line in inline.layout_object.children.get():
+
+    children = inline.layout_object.children.get() if isinstance(inline.layout_object.children, ProtectedField) else inline.layout_object.children
+
+    for line in children:
       line_bounds = skia.Rect.MakeEmpty()
       for child in line.children:
         if child.node.parent == self.node:
