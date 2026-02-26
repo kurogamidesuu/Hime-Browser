@@ -1,0 +1,4 @@
+pysdl2>=0.9.14
+skia-python>=115.0
+PyOpenGL>=3.1.6
+dukpy>=0.2.3
