@@ -13,7 +13,7 @@ This project is a deep dive into the inner workings of web browsers. It bypasses
 * **Rendering Engine:** Skia (`skia-python`)
 * **JavaScript Engine:** Duktape (via `dukpy` bindings)
 
-## ✨ Features Implemented
+## Features Implemented
 
 * **Networking:** HTTP request handling and parsing directly over raw sockets.
 * **Parsing:** Custom HTML and CSS parsers to build the DOM and CSSOM trees.
