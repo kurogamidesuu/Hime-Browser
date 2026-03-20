@@ -1,5 +1,5 @@
 import skia
-from constants import BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX, CSS_PROPERTIES
+from constants import BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
 from dom import Text, tree_to_list
 from draw import DrawRRect, DrawText, linespace, Blend, Transform, paint_outline, DrawImage, font, DrawCursor
 from css import parse_transform, parse_outline

@@ -308,6 +308,8 @@ class Browser:
     self.chrome_surface.draw(canvas, 0, 0)
     canvas.restore()
 
+    self.draw_scrollbar(canvas)
+
     self.root_surface.flushAndSubmit()
     sdl2.SDL_GL_SwapWindow(self.sdl_window)
 
@@ -579,6 +581,36 @@ class Browser:
     task = Task(self.active_tab.go_back)
     self.active_tab.task_runner.schedule_task(task)
     self.clear_data()
+
+  def draw_scrollbar(self, canvas):
+    if not self.active_tab_height:
+      return
+    
+    viewport_height = self.height - self.chrome.bottom
+    document_height = self.active_tab_height
+
+    if document_height <= viewport_height:
+      return
+    
+    scrollbar_width = 14
+    x = self.width - scrollbar_width
+
+    thumb_height = max(20, (viewport_height / document_height) * viewport_height)
+    
+    max_scroll_content = document_height - viewport_height
+    max_scroll_thumb = viewport_height - thumb_height
+
+    scroll_ratio = self.active_tab_scroll / max_scroll_content if max_scroll_content > 0 else 0
+    thumb_y = self.chrome.bottom + (scroll_ratio * max_scroll_thumb)
+
+    track_color = skia.Color(50, 50, 50) if self.dark_mode else skia.Color(240, 240, 240)
+    thumb_color = skia.Color(100, 100, 100) if self.dark_mode else skia.Color(180, 180, 180)
+
+    track_rect = skia.Rect.MakeLTRB(x, self.chrome.bottom, self.width, self.height)
+    canvas.drawRect(track_rect, skia.Paint(Color=track_color))
+
+    thumb_rect = skia.Rect.MakeLTRB(x + 2, thumb_y + 2, self.width - 2, thumb_y + thumb_height - 2)
+    canvas.drawRoundRect(thumb_rect, 5, 5, skia.Paint(Color=thumb_color, AntiAlias=True))
   
 class Frame:
   def __init__(self, tab, parent_frame, frame_element):
