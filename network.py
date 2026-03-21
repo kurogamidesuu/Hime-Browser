@@ -11,6 +11,11 @@ CACHE = {}
 
 class URL:
   def __init__(self, url):
+    if url == "about:blank":
+      self.scheme = "about"
+      self.path = "blank"
+      return
+
     self.view_source = False
     try:
       self.scheme, url = url.split(":", 1)
@@ -52,8 +57,8 @@ class URL:
 
     except Exception:
       print("Malformed URL found")
-      print("  URL was: " + str(url))
-      self.__init__("file:///C:/Coding/Projects/Web-Browser-Engineering/hello-browser.html")
+      self.scheme = "about"
+      self.path = "blank"
   
   def resolve(self, url):
     if "://" in url: return URL(url)
@@ -78,6 +83,9 @@ class URL:
       return URL(self.scheme + "://" + self.host + ":" + str(self.port) + url)
 
   def request(self, referrer, payload=None):
+    if self.scheme == "about":
+      return {}, b"<html><body></body></html>"
+
     if self.scheme == "file":
       path = os.path.normpath(self.path)
       with open(path, "rb") as f:
@@ -114,7 +122,11 @@ class URL:
     if key in SOCKETS:
       s = SOCKETS[key]
     else:
-      s = self.new_socket()      
+      try:
+        s = self.new_socket()
+      except socket.error:
+        self.url = "about:blank"
+        return {}, b"<html><body></body></html>"
       SOCKETS[key] = s
 
     method = "POST" if payload else "GET"
