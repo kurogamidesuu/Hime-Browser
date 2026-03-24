@@ -1,6 +1,6 @@
 import skia
 from constants import BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
-from dom import Text, tree_to_list
+from dom import Text, tree_to_list, Element
 from draw import DrawRRect, DrawText, linespace, Blend, Transform, paint_outline, DrawImage, font, DrawCursor
 from css import parse_transform, parse_outline
 
@@ -427,6 +427,21 @@ class LineLayout:
     
     for word in self.children:
       word.layout()
+
+    if isinstance(self.node, Element) and self.node.tag == "h1" and self.node.attributes.get("class") == "title" and self.children:
+      first_child = self.children[0]
+      last_child = self.children[-1]
+      
+      content_width = (last_child.x.get() + last_child.width.get()) - first_child.x.get()
+      
+      parent_width = self.parent.width.get()
+      offset = (parent_width - content_width) / 2
+      
+      parent_x = self.parent.x.get()
+      self.x.set(parent_x + offset)
+      
+      for word in self.children:
+        word.layout()
 
     if not self.children:
       self.ascent.set(0)
