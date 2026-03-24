@@ -464,6 +464,10 @@ class LineLayout:
       new_y += self.ascent.read(notify=child.y)
       if isinstance(child, TextLayout):
           new_y += child.ascent.read(notify=child.y) / 1.25
+
+          parent_node = getattr(child.node, "parent", None)
+          if parent_node and getattr(parent_node, "tag", None) == "sup":
+            new_y = self.y.read(notify=child.y)
       else:
           new_y += child.ascent.read(notify=child.y)
       child.y.set(new_y)

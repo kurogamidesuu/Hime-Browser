@@ -40,3 +40,5 @@ a:focus { outline: 2px solid black; }
 }
 
 iframe { outline: 1px solid black; }
+
+sup { font-size: 10px; }
