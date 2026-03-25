@@ -286,10 +286,46 @@ class BlockLayout:
   def flush(self): pass
 
   def word(self, node, word):
+    word = word.replace("&shy;", "\xad")
+
+    clean_word = word.replace("\xad", "")
+
     zoom = self.zoom.read(notify=self.children)
     node_font = font(node.style, zoom, notify=self.children)
-    w = node_font.measureText(word)
-    self.add_inline_child(node, w, TextLayout, self.frame, word)
+
+    w_clean = node_font.measureText(clean_word)
+    w = self.width.read(notify=self.children)
+
+    if self.cursor_x + w_clean <= w or "\xad" not in word:
+      self.add_inline_child(node, w_clean, TextLayout, self.frame, clean_word)
+      return
+    
+    parts = word.split("\xad")
+    
+    for i in range(len(parts)-1, 0, -1):
+      clean_chunk = "".join(parts[:i])
+      hyphenated_chunk = clean_chunk + "-"
+      w_hyphen_chunk = node_font.measureText(hyphenated_chunk)
+
+      if self.cursor_x + w_hyphen_chunk <= w:
+        self.add_inline_child(node, w_hyphen_chunk, TextLayout, self.frame, hyphenated_chunk)
+
+        remainder = "\xad".join(parts[i:])
+        self.new_line()
+        self.word(node, remainder)
+        return
+      
+    if self.cursor_x == 0:
+      first_chunk_hyphenated = parts[0] + "-"
+      w_first = node_font.measureText(first_chunk_hyphenated)
+      self.add_inline_child(node, w_first, TextLayout, self.frame, first_chunk_hyphenated)
+
+      remainder = "\xad".join(parts[1:])
+      self.new_line()
+      self.word(node, remainder)
+    else:
+      self.new_line()
+      self.word(node, word)
    
   def input(self, node):
     zoom = self.zoom.read(notify=self.children)
