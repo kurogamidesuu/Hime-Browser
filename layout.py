@@ -48,6 +48,23 @@ def paint_visual_effects(node, cmds, rect):
 def dpx(css_px, zoom):
   return css_px * zoom
 
+def get_small_caps_font(normal_font):
+  size = normal_font.getSize()
+  small_size = size * 0.8
+  family_name = normal_font.getTypeface().getFamilyName()
+  bold_typeface = skia.Typeface.MakeFromName(family_name, skia.FontStyle.Bold())
+  return skia.Font(bold_typeface, small_size)
+
+def measure_abbr_word(word, normal_font):
+  small_font = get_small_caps_font(normal_font)
+  w = 0
+  for char in word:
+    if char.islower():
+      w += small_font.measureText(char.upper())
+    else:
+      w += normal_font.measureText(char)
+  return w
+
 class ProtectedField:
   def __init__(self, obj, name, parent=None, dependencies=None):
     self.obj = obj
@@ -293,7 +310,7 @@ class BlockLayout:
     zoom = self.zoom.read(notify=self.children)
     node_font = font(node.style, zoom, notify=self.children)
 
-    w_clean = node_font.measureText(clean_word)
+    w_clean = self.measure_word(node, clean_word, node_font)
     w = self.width.read(notify=self.children)
 
     if self.cursor_x + w_clean <= w or "\xad" not in word:
@@ -305,7 +322,7 @@ class BlockLayout:
     for i in range(len(parts)-1, 0, -1):
       clean_chunk = "".join(parts[:i])
       hyphenated_chunk = clean_chunk + "-"
-      w_hyphen_chunk = node_font.measureText(hyphenated_chunk)
+      w_hyphen_chunk = self.measure_word(node, hyphenated_chunk, node_font)
 
       if self.cursor_x + w_hyphen_chunk <= w:
         self.add_inline_child(node, w_hyphen_chunk, TextLayout, self.frame, hyphenated_chunk)
@@ -317,7 +334,7 @@ class BlockLayout:
       
     if self.cursor_x == 0:
       first_chunk_hyphenated = parts[0] + "-"
-      w_first = node_font.measureText(first_chunk_hyphenated)
+      w_first = self.measure_word(node, first_chunk_hyphenated, node_font)
       self.add_inline_child(node, w_first, TextLayout, self.frame, first_chunk_hyphenated)
 
       remainder = "\xad".join(parts[1:])
@@ -396,7 +413,7 @@ class BlockLayout:
     if self.cursor_x + w > width:
       self.new_line()
     line = self.temp_children[-1]
-    if word:
+    if child_class == TextLayout:
       child = child_class(node, word, line, self.previous_word)
     else:
       child = child_class(node, line, self.previous_word, frame)
@@ -404,6 +421,12 @@ class BlockLayout:
     self.previous_word = child
     zoom = self.zoom.read(notify=self.children)
     self.cursor_x += w + font(node.style, zoom, notify=self.children).measureText(" ")
+
+  def measure_word(self, node, word, normal_font):
+    if getattr(node.parent, "tag", None) == "abbr":
+      return measure_abbr_word(word, normal_font)
+    
+    return normal_font.measureText(word)
 
 class LineLayout:
   def __init__(self, node, parent, previous):
@@ -588,7 +611,11 @@ class TextLayout:
     self.font.set(font(self.node.style, zoom, notify=self.font))
 
     f = self.font.read(notify=self.width)
-    self.width.set(f.measureText(self.word))
+
+    if getattr(self.node.parent, "tag", None) == "abbr":
+      self.width.set(measure_abbr_word(self.word, f))
+    else:
+      self.width.set(f.measureText(self.word))
 
     f = self.font.read(notify=self.ascent)
     self.ascent.set(f.getMetrics().fAscent * 1.25)
@@ -613,9 +640,30 @@ class TextLayout:
     cmds = []
     leading = self.height.get() / 1.25 * .25 / 2
     color = self.node.style["color"].get()
-    cmds.append(DrawText(self.x.get(), self.y.get() + leading, self.word, self.font.get(), color))
+    normal_font = self.font.get()
+
+    is_abbr = getattr(self.node.parent, "tag", None) == "abbr"
+
+    if not is_abbr:
+      cmds.append(DrawText(self.x.get(), self.y.get() + leading, self.word, normal_font, color))
+    else:  
+      current_x = self.x.get()
+      small_font = get_small_caps_font(normal_font)
+
+      normal_ascent = normal_font.getMetrics().fAscent
+      small_ascent = small_font.getMetrics().fAscent
+      y_offset = small_ascent - normal_ascent
+
+      for char in self.word:
+        if char.islower():
+          upper_char = char.upper()
+          cmds.append(DrawText(current_x, self.y.get() + leading + y_offset, upper_char, small_font, color))
+          current_x += small_font.measureText(upper_char)
+        else:
+          cmds.append(DrawText(current_x, self.y.get() + leading, char, normal_font, color))
+          current_x += normal_font.measureText(char)
     return cmds
-  
+
   def self_rect(self):
     return skia.Rect.MakeLTRB(
       self.x.get(), self.y.get(), self.x.get() + self.width.get(), self.y.get() + self.height.get()
