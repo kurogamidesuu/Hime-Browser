@@ -1124,7 +1124,7 @@ class Chrome:
     self.focus = None
     self.address_bar = ""
 
-    self.font = get_font(12, "normal", "roman")
+    self.font = get_font(12, "normal", "roman", "Times New Roman")
     self.font_height = linespace(self.font)
     self.padding = 5
 

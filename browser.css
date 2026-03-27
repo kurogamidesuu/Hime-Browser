@@ -1,4 +1,7 @@
-pre { background-color: gray; }
+pre {
+  background-color: gray;
+  font-family: monospace;
+}
 
 a { color: blue; }
 

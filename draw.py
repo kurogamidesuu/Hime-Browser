@@ -46,21 +46,33 @@ def parse_image_rendering(quality):
   else:
     return skia.SamplingOptions(skia.FilterMode.kLinear, skia.MipmapMode.kLinear)
 
-def get_font(size, weight, style):
-  key = (weight, style)
+def get_font(size, weight, style, family):
+  family = family.strip("\"'")
+
+  if family == "monospace":
+    skia_family = "Consolas"
+  else:
+    skia_family = "Arial"
+
+  key = (weight, style, skia_family)
+
   if key not in FONTS:
     if weight == "bold":
       skia_weight = skia.FontStyle.kBold_Weight
     else:
       skia_weight = skia.FontStyle.kNormal_Weight
+
     if style == "italic":
       skia_style = skia.FontStyle.kItalic_Slant
     else:
       skia_style = skia.FontStyle.kUpright_Slant
+
     skia_width = skia.FontStyle.kNormal_Width
     style_info = skia.FontStyle(skia_weight, skia_width, skia_style)
-    font = skia.Typeface('Arial', style_info)
+
+    font = skia.Typeface(skia_family, style_info)
     FONTS[key] = font
+
   return skia.Font(FONTS[key], size)
 
 def font(css_style, zoom, notify):
@@ -68,13 +80,20 @@ def font(css_style, zoom, notify):
 
   weight = css_style["font-weight"].read(notify)
   style = css_style["font-style"].read(notify)
+
+  try:
+    family = css_style["font-family"].read(notify)
+  except KeyError:
+    family = "Times New Roman"
+
   size = None
   try:
     size = float(css_style["font-size"].read(notify)[:-2]) * 0.75
   except:
     size = 16
   font_size = dpx(size, zoom)
-  return get_font(font_size, weight, style)
+
+  return get_font(font_size, weight, style, family)
 
 def linespace(font):
   metrics = font.getMetrics()

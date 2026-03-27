@@ -285,8 +285,16 @@ class BlockLayout:
 
   def recurse(self, node):
     if isinstance(node, Text):
-      for word in node.text.split():
-        self.word(node, word)
+      if self.is_pre(node):
+        lines = node.text.split("\n")
+        for i, line in enumerate(lines):
+          if i > 0:
+            self.new_line()
+          if line:
+            self.word(node, line)
+      else:
+        for word in node.text.split():
+          self.word(node, word)
     else:
       if node.tag == "br":
         self.new_line()
@@ -304,7 +312,6 @@ class BlockLayout:
 
   def word(self, node, word):
     word = word.replace("&shy;", "\xad")
-
     clean_word = word.replace("\xad", "")
 
     zoom = self.zoom.read(notify=self.children)
@@ -312,6 +319,10 @@ class BlockLayout:
 
     w_clean = self.measure_word(node, clean_word, node_font)
     w = self.width.read(notify=self.children)
+
+    if self.is_pre(node):
+      self.add_inline_child(node, w_clean, TextLayout, self.frame, clean_word)
+      return
 
     if self.cursor_x + w_clean <= w or "\xad" not in word:
       self.add_inline_child(node, w_clean, TextLayout, self.frame, clean_word)
@@ -410,8 +421,10 @@ class BlockLayout:
   
   def add_inline_child(self, node, w, child_class, frame, word=None):
     width = self.width.read(notify=self.children)
-    if self.cursor_x + w > width:
+    is_pre = self.is_pre(node)
+    if not is_pre and self.cursor_x + w > width:
       self.new_line()
+
     line = self.temp_children[-1]
     if child_class == TextLayout:
       child = child_class(node, word, line, self.previous_word)
@@ -419,14 +432,23 @@ class BlockLayout:
       child = child_class(node, line, self.previous_word, frame)
     line.children.append(child)
     self.previous_word = child
+
     zoom = self.zoom.read(notify=self.children)
-    self.cursor_x += w + font(node.style, zoom, notify=self.children).measureText(" ")
+
+    space_w = 0 if is_pre else font(node.style, zoom, notify=self.children).measureText(" ")
+    self.cursor_x += w + space_w
 
   def measure_word(self, node, word, normal_font):
     if getattr(node.parent, "tag", None) == "abbr":
       return measure_abbr_word(word, normal_font)
-    
     return normal_font.measureText(word)
+
+  def is_pre(self, node):
+    curr = node
+    while curr:
+      if getattr(curr, "tag", None) == "pre": return True
+      curr = getattr(curr, "parent", None)
+    return False
 
 class LineLayout:
   def __init__(self, node, parent, previous):
@@ -576,7 +598,8 @@ class TextLayout:
       [self.zoom,
        self.node.style["font-weight"],
        self.node.style["font-style"],
-       self.node.style["font-size"]])
+       self.node.style["font-size"],
+       self.node.style["font-family"]])
     self.width = ProtectedField(self, "width", self.parent, [self.font])
     self.height = ProtectedField(self, "height", self.parent, [self.font])
     self.ascent = ProtectedField(self, "ascent", self.parent, [self.font])
@@ -630,7 +653,11 @@ class TextLayout:
       prev_x = self.previous.x.read(notify=self.x)
       prev_font = self.previous.font.read(notify=self.x)
       prev_width = self.previous.width.read(notify=self.x)
-      self.x.set(prev_x + prev_font.measureText(' ') + prev_width)
+
+      is_pre = self.parent.parent.is_pre(self.node)
+      space_w = 0 if is_pre else prev_font.measureText(' ')
+
+      self.x.set(prev_x + space_w + prev_width)
     else:
       self.x.copy(self.parent.x)
 
@@ -692,7 +719,8 @@ class EmbedLayout:
       [self.zoom,
       self.node.style['font-weight'],
       self.node.style['font-style'],
-      self.node.style['font-size']])
+      self.node.style['font-size'],
+      self.node.style["font-family"]])
     self.width = ProtectedField(self, "width", self.parent, [self.zoom])
     self.height = ProtectedField(self, "height", self.parent, [self.zoom, self.font, self.width])
     self.ascent = ProtectedField(self, "ascent", self.parent, [self.height])

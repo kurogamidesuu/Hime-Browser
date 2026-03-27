@@ -83,7 +83,16 @@ class HTMLParser:
     return self.finish()
   
   def add_text(self, text):
-    if text.isspace(): return
+    if text.isspace():
+      in_pre = False
+      for node in self.unfinished:
+        if node.tag == "pre":
+          in_pre = True
+          break
+      
+      if not in_pre:
+        return
+      
     text = html.unescape(text)
     self.implicit_tags(None)
     parent = self.unfinished[-1]

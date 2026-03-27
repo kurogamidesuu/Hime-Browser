@@ -28,6 +28,7 @@ INHERITED_PROPERTIES = {
   "font-style": "normal",
   "font-weight": "normal",
   "color": "black",
+  "font-family": "Arial"
 }
 
 NAMED_COLORS = {
@@ -51,4 +52,5 @@ CSS_PROPERTIES = {
   "border-radius": "0px", "overflow": "visible",
   "outline": "none", "background-color": "transparent",
   "image-rendering": "auto",
+  "font-family": "Arial"
 }
