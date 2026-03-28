@@ -63,23 +63,39 @@ class HTMLParser:
     self.unfinished = []
 
   def parse(self):
-    text = ""
+    buffer = ""
     in_tag = False
-    for c in self.body:
+    
+    body = self.body
+    i = 0
+    while i < len(body):
+      if body.startswith("<!--", i):
+        i = body.find("-->", i)
+
+        if i == -1:
+          break
+
+        i += 3
+        continue
+      
+      c = body[i]
+
       if c == "<":
         in_tag = True
-        if text:
-          self.add_text(text)
-        text = ""
+        if buffer: self.add_text(buffer)
+        buffer = ""
       elif c == ">":
         in_tag = False
-        self.add_tag(text)
-        text = ""
+        self.add_tag(buffer)
+        buffer = ""
       else:
-        text += c
+        buffer += c
+      
+      i += 1
     
-    if not in_tag and text:
-      self.add_text(text)
+    if not in_tag and buffer:
+      self.add_text(buffer)
+
     return self.finish()
   
   def add_text(self, text):
@@ -103,11 +119,31 @@ class HTMLParser:
     tag, attributes = self.get_attributes(tag)
     if tag.startswith("!"): return
     self.implicit_tags(tag)
+    if tag == "p":
+      if any(n.tag == "p" for n in self.unfinished):
+        self.add_tag("/p")
+    elif tag == "li":
+      for n in reversed(self.unfinished):
+        if n.tag == "li":
+          self.add_tag("/li")
+          break
+        if n.tag in ["ul", "ol"]:
+          break
+
     if tag.startswith("/"):
       if len(self.unfinished) == 1: return
-      node = self.unfinished.pop()
-      parent = self.unfinished[-1]
-      parent.children.append(node)
+
+      closing_tag = tag[1:]
+      open_tags = [n.tag for n in self.unfinished]
+
+      if closing_tag in open_tags:
+        while True:
+          node = self.unfinished.pop()
+          parent = self.unfinished[-1]
+          parent.children.append(node)
+          if node.tag == closing_tag:
+            break
+      return
     elif tag in self.SELF_CLOSING_TAGS:
       parent = self.unfinished[-1]
       node = Element(tag, attributes, parent)
