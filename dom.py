@@ -64,6 +64,7 @@ class HTMLParser:
 
   def parse(self):
     buffer = ""
+    quote_char = ""
     in_tag = False
     in_script = False
     
@@ -94,17 +95,27 @@ class HTMLParser:
           if buffer: self.add_text(buffer)
           buffer = ""
       elif c == ">":
-        in_tag = False
-        self.add_tag(buffer)
+        if in_tag and quote_char:
+          buffer += c
+        else:
+          in_tag = False
+          self.add_tag(buffer)
 
-        parts = buffer.split()
-        tag_name = parts[0].casefold() if parts else ""
+          parts = buffer.split()
+          tag_name = parts[0].casefold() if parts else ""
 
-        if tag_name == "script":
-          in_script = True
+          if tag_name == "script":
+            in_script = True
 
-        buffer = ""
+          buffer = ""
+          quote_char = ""
       else:
+        if in_tag and c in ["'", '"']:
+          if quote_char == c:
+            quote_char = ""
+          elif not quote_char:
+            quote_char = c
+
         buffer += c
       
       i += 1
@@ -182,8 +193,27 @@ class HTMLParser:
     return self.unfinished.pop()
   
   def get_attributes(self, text):
-    parts = text.split()
-    tag = parts[0].casefold()
+    parts = []
+    buffer = ""
+    quote_char = ""
+    for c in text:
+      if c in ["'", '"']:
+        if quote_char == c:
+          quote_char = ""
+        elif not quote_char:
+          quote_char = c
+        buffer += c
+      elif c.isspace() and not quote_char:
+        if buffer:
+          parts.append(buffer)
+          buffer = ""
+      else:
+        buffer += c
+
+    if buffer:
+      parts.append(buffer)
+
+    tag = parts[0].casefold() if parts else ""
     attributes = {}
     for attrpair in parts[1:]:
       if "=" in attrpair:
