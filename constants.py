@@ -42,6 +42,8 @@ NAMED_COLORS = {
   "lightgreen": "#90ee90",
   "orange": "#ffa500",
   "orangered": "#ff4500",
+  "lightgray": "#d3d3d3",
+  
 }
 
 CSS_PROPERTIES = {

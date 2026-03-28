@@ -390,6 +390,9 @@ class BlockLayout:
     cmds = []
     bgcolor = self.node.style["background-color"].get()
 
+    if isinstance(self.node, Element) and self.node.tag == "nav" and self.node.attributes.get("class") == "links":
+      bgcolor = "lightgray"
+
     if bgcolor != "transparent":
       radius = dpx(float(
         self.node.style["border-radius"].get()[:-2]),
