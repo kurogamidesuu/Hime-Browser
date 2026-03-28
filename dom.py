@@ -149,6 +149,7 @@ class HTMLParser:
     tag, attributes = self.get_attributes(tag)
     if tag.startswith("!"): return
     self.implicit_tags(tag)
+
     if tag == "p":
       if any(n.tag == "p" for n in self.unfinished):
         self.add_tag("/p")
@@ -167,12 +168,24 @@ class HTMLParser:
       open_tags = [n.tag for n in self.unfinished]
 
       if closing_tag in open_tags:
-        while True:
+        match_index = -1
+        for i in range(len(self.unfinished)-1, -1, -1):
+          if self.unfinished[i].tag == closing_tag:
+            match_index = i
+            break
+        
+        misnested_nodes = self.unfinished[match_index+1:]
+        tags_to_reopen = [(node.tag, getattr(node, "attributes", {})) for node in misnested_nodes]
+
+        while len(self.unfinished) > max(match_index, 1):
           node = self.unfinished.pop()
           parent = self.unfinished[-1]
           parent.children.append(node)
-          if node.tag == closing_tag:
-            break
+        
+        for tag_name, attrs in tags_to_reopen:
+          parent = self.unfinished[-1]
+          new_node = Element(tag_name, attrs, parent)
+          self.unfinished.append(new_node)
       return
     elif tag in self.SELF_CLOSING_TAGS:
       parent = self.unfinished[-1]
