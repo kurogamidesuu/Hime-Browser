@@ -90,20 +90,10 @@ class URL:
       path = os.path.normpath(self.path)
       with open(path, "rb") as f:
         body = f.read()
-      
-      if self.view_source:
-        text = body.decode("utf8", "replace")
-        body = html.escape(text).encode("utf8")
-      
       return {}, body
       
     if self.scheme == "data":
       body = str(self.content).encode("utf8")
-
-      if self.view_source:
-        text = body.decode("utf8", "replace")
-        body = html.escape(text).encode("utf8")
-
       return {}, body
     
     url = self.__str__()
@@ -228,10 +218,6 @@ class URL:
     max_age = self.get_maxage(response_headers)
     if max_age > 0:
       CACHE[url] = (response_headers, content, time.time())
-
-    if self.view_source:
-      text = content.decode("utf8", "replace")
-      content = html.escape(text).encode("utf8")
 
     return response_headers, content
   

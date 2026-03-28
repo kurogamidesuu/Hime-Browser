@@ -239,3 +239,32 @@ class HTMLParser:
         self.add_tag("/head")
       else:
         break
+
+class ViewSourceParser(HTMLParser):
+  def __init__(self, body):
+    super().__init__(body)
+
+    self.root = Element("html", {}, None)
+    self.body_node = Element("body", {}, self.root)
+    self.pre_node = Element("pre", {}, self.body_node)
+
+    self.root.children.append(self.body_node)
+    self.body_node.children.append(self.pre_node)
+
+    self.unfinished = [self.pre_node]
+
+  def add_text(self, text):
+    parent = self.unfinished[-1]
+    b_node = Element("b", {}, parent)
+    text_node = Text(text, b_node)
+
+    b_node.children.append(text_node)
+    parent.children.append(b_node)
+
+  def add_tag(self, tag):
+    parent = self.unfinished[-1]
+    text_node = Text(f"<{tag}>", parent)
+    parent.children.append(text_node)
+
+  def finish(self):
+    return self.root
