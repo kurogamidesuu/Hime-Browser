@@ -65,6 +65,7 @@ class HTMLParser:
   def parse(self):
     buffer = ""
     in_tag = False
+    in_script = False
     
     body = self.body
     i = 0
@@ -72,8 +73,7 @@ class HTMLParser:
       if body.startswith("<!--", i):
         i = body.find("-->", i)
 
-        if i == -1:
-          break
+        if i == -1:break
 
         i += 3
         continue
@@ -81,12 +81,28 @@ class HTMLParser:
       c = body[i]
 
       if c == "<":
-        in_tag = True
-        if buffer: self.add_text(buffer)
-        buffer = ""
+        if in_script:
+          if body[i:i+9].casefold() == "</script>":
+            in_script = False
+            in_tag = True
+            if buffer: self.add_text(buffer)
+            buffer = ""
+          else:
+            buffer += c
+        else:
+          in_tag = True
+          if buffer: self.add_text(buffer)
+          buffer = ""
       elif c == ">":
         in_tag = False
         self.add_tag(buffer)
+
+        parts = buffer.split()
+        tag_name = parts[0].casefold() if parts else ""
+
+        if tag_name == "script":
+          in_script = True
+
         buffer = ""
       else:
         buffer += c
@@ -116,6 +132,9 @@ class HTMLParser:
     parent.children.append(node)
   
   def add_tag(self, tag):
+    if not tag.strip(): 
+      return
+    
     tag, attributes = self.get_attributes(tag)
     if tag.startswith("!"): return
     self.implicit_tags(tag)
