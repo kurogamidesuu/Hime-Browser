@@ -5,7 +5,7 @@ import math
 import threading
 import OpenGL.GL
 from constants import HEIGHT, WIDTH, VSTEP, SCROLL_STEP, REFRESH_RATE_SEC, INHERITED_PROPERTIES, BROKEN_IMAGE
-from dom import HTMLParser, ViewSourceParser, Text, Element, tree_to_list
+from dom import HTMLParser, ViewSourceParser, Text, Element, tree_to_list, add_toc_header
 from css import DEFAULT_STYLE_SHEET, CSSParser, style, cascade_priority, absolute_bounds_for_obj, dirty_style
 from layout import DocumentLayout, add_parent_pointers, dpx, paint_tree, BlockLayout, ProtectedField
 from draw import DrawLine, DrawOutline, DrawText, linespace, PaintCommand, CompositedLayer, DrawCompositedLayer, Blend, local_to_absolute, get_font
@@ -667,6 +667,8 @@ class Frame:
       self.nodes = ViewSourceParser(body).parse()
     else:
       self.nodes = HTMLParser(body).parse()
+
+    add_toc_header(self.nodes)
     
     if self.js: self.js.discarded = True
     self.js = self.tab.get_js(url)

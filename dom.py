@@ -1,6 +1,19 @@
 import html
 from constants import FORMATTING_TAGS
 
+def add_toc_header(node):
+  if isinstance(node, Element) and node.tag == "nav" and node.attributes.get("id") == "toc":
+    header_node = Element("div", {"style": "background-color: gray;"}, node)
+      
+    text_node = Text("Table of Contents", header_node)
+    header_node.children.append(text_node)
+      
+    node.children.insert(0, header_node)
+      
+  if hasattr(node, 'children'):
+    for child in node.children:
+      add_toc_header(child)
+
 def print_tree(node, indent=0):
   from layout import ProtectedField
 

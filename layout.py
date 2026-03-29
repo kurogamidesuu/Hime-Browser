@@ -223,7 +223,12 @@ class BlockLayout:
 
     self.zoom.copy(self.parent.zoom)
     self.width.copy(self.parent.width)
-    self.x.copy(self.parent.x)
+
+    if getattr(self.node, "tag", None) == "li":
+      parent_x = self.parent.x.read(notify=self.x)
+      self.x.set(parent_x + dpx(20, self.zoom.get()))
+    else:
+      self.x.copy(self.parent.x)
     if self.previous:
       prev_y = self.previous.y.read(notify=self.y)
       prev_height = self.previous.height.read(notify=self.y)
@@ -404,6 +409,15 @@ class BlockLayout:
       )
       cmds.append(DrawRRect(
         self.self_rect(), radius, bgcolor
+      ))
+
+    if getattr(self.node, "tag", None) == "li":
+      bullet_size = dpx(6, self.zoom.get())
+      bullet_x = self.x.get() - dpx(12, self.zoom.get())
+      bullet_y = self.y.get() + dpx(6, self.zoom.get())
+
+      cmds.append(DrawRRect(
+        skia.Rect.MakeXYWH(bullet_x, bullet_y, bullet_size, bullet_size), 0, "black"
       ))
     return cmds
 
