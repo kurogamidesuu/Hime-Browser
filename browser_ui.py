@@ -1343,6 +1343,8 @@ class AccessibilityNode:
       self.text += " is focused"
 
   def build_internal(self, child_node):
+    if getattr(child_node, "tag", None) in ["head", "style", "script"]:
+      return
     if isinstance(child_node, Element) and child_node.tag == "iframe" and child_node.frame and child_node.frame.loaded:
       child = FrameAccessibilityNode(child_node, self)
     else:
