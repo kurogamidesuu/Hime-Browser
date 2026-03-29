@@ -1,4 +1,5 @@
 import html
+from constants import FORMATTING_TAGS
 
 def print_tree(node, indent=0):
   from layout import ProtectedField
@@ -175,7 +176,10 @@ class HTMLParser:
             break
         
         misnested_nodes = self.unfinished[match_index+1:]
-        tags_to_reopen = [(node.tag, getattr(node, "attributes", {})) for node in misnested_nodes]
+
+        tags_to_reopen = [(node.tag, getattr(node, "attributes", {})) 
+                          for node in misnested_nodes
+                          if node.tag in FORMATTING_TAGS]
 
         while len(self.unfinished) > max(match_index, 1):
           node = self.unfinished.pop()
