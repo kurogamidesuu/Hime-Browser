@@ -1389,7 +1389,8 @@ class AccessibilityNode:
 
     for line in children:
       line_bounds = skia.Rect.MakeEmpty()
-      for child in line.children:
+      line_children = line.children.get() if isinstance(line.children, ProtectedField) else line.children
+      for child in line_children:
         if child.node.parent == self.node:
           line_bounds.join(skia.Rect.MakeXYWH(
             child.x.get(), child.y.get(), child.width.get(), child.height.get()

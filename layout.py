@@ -65,6 +65,9 @@ def measure_abbr_word(word, normal_font):
       w += normal_font.measureText(char)
   return w
 
+def is_inline(node):
+  return not (isinstance(node, Element) and node.tag in BLOCK_ELEMENTS)
+
 class ProtectedField:
   def __init__(self, obj, name, parent=None, dependencies=None):
     self.obj = obj
@@ -189,8 +192,13 @@ class DocumentLayout:
 
 class BlockLayout:
   def __init__(self, node, parent, previous, frame):
-    self.node = node
-    node.layout_object = self
+    if isinstance(node, list):
+      self.children_nodes = node
+      self.node = node[0]
+    else:
+      self.children_nodes = None
+      self.node = node
+      node.layout_object = self
     self.frame = frame
     self.parent = parent
     self.previous = previous
@@ -241,12 +249,25 @@ class BlockLayout:
       if self.children.dirty:
         children = []
         previous = None
+        inline_siblings = []
         for child in self.node.children:
           if getattr(child, "tag", None) in ["head", "style", "script"]:
             continue
-          next = BlockLayout(child, self, previous, self.frame)
-          children.append(next)
-          previous = next
+          if is_inline(child):
+            inline_siblings.append(child)
+          else:
+            if inline_siblings:
+              group_block = BlockLayout(inline_siblings, self, previous, self.frame)
+              children.append(group_block)
+              previous = group_block
+              inline_siblings = []
+
+            next = BlockLayout(child, self, previous, self.frame)
+            children.append(next)
+            previous = next
+        if inline_siblings:
+          group_block = BlockLayout(inline_siblings, self, previous, self.frame)
+          children.append(group_block)
         self.children.set(children)
 
         height_dependencies = [child.height for child in children]
@@ -256,7 +277,11 @@ class BlockLayout:
       if self.children.dirty:
         self.temp_children = []
         self.new_line()
-        self.recurse(self.node)
+        if self.children_nodes:
+          for child in self.children_nodes:
+            self.recurse(child)
+        else:
+          self.recurse(self.node)
         self.children.set(self.temp_children)
 
         height_dependencies = [child.height for child in self.temp_children]
@@ -277,6 +302,8 @@ class BlockLayout:
     self.height.set(new_height)
 
   def layout_mode(self):
+    if self.children_nodes:
+      return "inline"
     if isinstance(self.node, Text):
       return "inline"
     elif self.node.children:
