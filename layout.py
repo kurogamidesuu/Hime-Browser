@@ -253,18 +253,28 @@ class BlockLayout:
         for child in self.node.children:
           if getattr(child, "tag", None) in ["head", "style", "script"]:
             continue
-          if is_inline(child):
-            inline_siblings.append(child)
-          else:
+
+          if getattr(child, "tag", None) == "h6":
             if inline_siblings:
               group_block = BlockLayout(inline_siblings, self, previous, self.frame)
               children.append(group_block)
               previous = group_block
-              inline_siblings = []
+            inline_siblings = [child]
+          elif is_inline(child):
+            inline_siblings.append(child)
+          else:
+            if inline_siblings and all(is_inline(grandchild) for grandchild in child.children):
+              inline_siblings.extend(child.children)
+            else:
+              if inline_siblings:
+                group_block = BlockLayout(inline_siblings, self, previous, self.frame)
+                children.append(group_block)
+                previous = group_block
+                inline_siblings = []
 
-            next = BlockLayout(child, self, previous, self.frame)
-            children.append(next)
-            previous = next
+              next = BlockLayout(child, self, previous, self.frame)
+              children.append(next)
+              previous = next
         if inline_siblings:
           group_block = BlockLayout(inline_siblings, self, previous, self.frame)
           children.append(group_block)
