@@ -54,7 +54,7 @@ def get_font(size, weight, style, family):
   else:
     skia_family = "Arial"
 
-  key = (weight, style, skia_family)
+  key = (size, weight, style, skia_family)
 
   if key not in FONTS:
     if weight == "bold":

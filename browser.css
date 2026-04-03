@@ -47,3 +47,5 @@ iframe { outline: 1px solid black; }
 sup { font-size: 10px; }
 
 h6 { font-weight: bold; }
+
+code { font-family: monospace; }
