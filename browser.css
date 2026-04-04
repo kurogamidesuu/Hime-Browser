@@ -60,3 +60,5 @@ figcaption, main, div, table, form, fieldset,
 legend, details, summary {
   display: block;
 }
+
+head, style, script { display: none; }

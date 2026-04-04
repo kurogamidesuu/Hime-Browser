@@ -221,7 +221,7 @@ class Browser:
       self.handle_down()
 
   def clamp_scroll(self, scroll):
-    height = self.active_tab_height
+    height = self.active_tab_height + 2*VSTEP
     maxscroll = height - (self.height - self.chrome.bottom)
     return max(0, min(scroll, maxscroll))
 

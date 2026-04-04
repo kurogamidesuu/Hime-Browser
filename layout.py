@@ -263,7 +263,7 @@ class BlockLayout:
         previous = None
         inline_siblings = []
         for child in self.node.children:
-          if getattr(child, "tag", None) in ["head", "style", "script"]:
+          if not isinstance(child, Text) and child.style.get("display").get() == "none":
             continue
 
           if getattr(child, "tag", None) == "h6":
