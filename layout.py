@@ -230,7 +230,18 @@ class BlockLayout:
     if not self.layout_needed(): return
 
     self.zoom.copy(self.parent.zoom)
-    self.width.copy(self.parent.width)
+
+    if not self.children_nodes:
+      if self.node.style.get("width").get() == "auto":
+        self.width.copy(self.parent.width)
+      else:
+        w = self.node.style.get("width").get()
+        if w.endswith("px"):
+          self.width.set(dpx(int(w[:-2]), self.zoom.get()))
+        else:
+          self.width.copy(self.parent.width)
+    else:
+      self.width.copy(self.parent.width)
 
     if getattr(self.node, "tag", None) == "li":
       parent_x = self.parent.x.read(notify=self.x)
@@ -309,7 +320,18 @@ class BlockLayout:
       child.height.read(notify=self.height)
       for child in children
     ])
-    self.height.set(new_height)
+
+    if not self.children_nodes:
+      if self.node.style.get("height").get() == "auto":
+        self.height.set(new_height)
+      else:
+        h = self.node.style.get("height").get()
+        if h.endswith("px"):
+          self.height.set(dpx(int(h[:-2]), self.zoom.get()))
+        else:
+          self.height.set(new_height)
+    else:
+      self.height.set(new_height)
 
   def layout_mode(self):
     if self.children_nodes:

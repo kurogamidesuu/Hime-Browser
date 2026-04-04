@@ -47,14 +47,22 @@ NAMED_COLORS = {
 }
 
 CSS_PROPERTIES = {
-  "font-size": "inherit", "font-weight": "inherit",
-  "font-style": "inherit", "color": "inherit",
-  "opacity": "1.0", "transition": "",
-  "transform": "none", "mix-blend-mode": None,
-  "border-radius": "0px", "overflow": "visible",
-  "outline": "none", "background-color": "transparent",
+  "font-size": "inherit",
+  "font-weight": "inherit",
+  "font-style": "inherit",
+  "font-family": "Arial",
+  "color": "inherit",
+  "opacity": "1.0",
+  "transition": "",
+  "transform": "none",
+  "mix-blend-mode": None,
+  "border-radius": "0px",
+  "overflow": "visible",
+  "outline": "none",
+  "background-color": "transparent",
   "image-rendering": "auto",
-  "font-family": "Arial"
+  "width": "auto",
+  "height": "auto",
 }
 
 FORMATTING_TAGS = ["b", "i", "em", "strong", "u", "s", "tt", "small", "big", "abbr"]
