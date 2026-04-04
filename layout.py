@@ -1,5 +1,5 @@
 import skia
-from constants import BLOCK_ELEMENTS, HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
+from constants import HSTEP, VSTEP, INPUT_WIDTH_PX, IFRAME_HEIGHT_PX, IFRAME_WIDTH_PX
 from dom import Text, tree_to_list, Element
 from draw import DrawRRect, DrawText, linespace, Blend, Transform, paint_outline, DrawImage, font, DrawCursor
 from css import parse_transform, parse_outline
@@ -66,7 +66,8 @@ def measure_abbr_word(word, normal_font):
   return w
 
 def is_inline(node):
-  return not (isinstance(node, Element) and node.tag in BLOCK_ELEMENTS)
+  if isinstance(node, Text): return True
+  return node.style.get("display").get() == "inline"
 
 class ProtectedField:
   def __init__(self, obj, name, parent=None, dependencies=None):
@@ -338,20 +339,17 @@ class BlockLayout:
       self.height.set(new_height)
 
   def layout_mode(self):
-    if self.children_nodes:
-      return "inline"
     if isinstance(self.node, Text):
       return "inline"
-    elif self.node.children:
-      for child in self.node.children:
-        if isinstance(child, Text): continue
-        if child.tag in BLOCK_ELEMENTS:
-          return "block"
+    if self.children_nodes:
       return "inline"
-    elif self.node.tag in ["input", "img", "iframe"]:
-      return "inline"
-    else:
+    
+    display = self.node.style.get("display").get()
+    
+    if display == "block":
       return "block"
+    else:
+      return "inline"
 
   def recurse(self, node):
     if isinstance(node, Text):

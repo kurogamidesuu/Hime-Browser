@@ -25,7 +25,7 @@ class CSSParser:
       cur = self.s[self.i]
       if cur == "'":
         in_quote = not in_quote
-      if cur.isalnum() or cur in ",/#-.%()\"'" or (in_quote and cur == ':'):
+      if cur.isalnum() or cur in "/#-.%()\"'" or (in_quote and cur == ':'):
         self.i += 1
       else:
         break
@@ -70,7 +70,7 @@ class CSSParser:
   def selector(self):
     out = self.simple_selector()
     self.whitespace()
-    while self.i < len(self.s) and self.s[self.i] != "{":
+    while self.i < len(self.s) and self.s[self.i] not in ["{", ","]:
       descendant = self.simple_selector()
       out = DescendantSelector(out, descendant)
       self.whitespace()
@@ -97,6 +97,7 @@ class CSSParser:
     rules = []
     media = None
     self.whitespace()
+    selectors = []
     while self.i < len(self.s):
       try:
         if self.s[self.i] == "@" and not media:
@@ -112,12 +113,20 @@ class CSSParser:
           self.whitespace()
         else:
           selector = self.selector()
+          if self.s[self.i] == ",":
+            selectors.append(selector)
+            self.literal(",")
+            self.whitespace()
+            continue
+          selectors.append(selector)
           self.literal("{")
           self.whitespace()
           body = self.body()
           self.literal("}")
           self.whitespace()
-          rules.append((media, selector, body))
+          for sel in selectors:
+            rules.append((media, sel, body))
+          selectors = []
       except Exception:
         why = self.ignore_until(["}"])
         if why == "}":

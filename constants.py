@@ -63,6 +63,7 @@ CSS_PROPERTIES = {
   "image-rendering": "auto",
   "width": "auto",
   "height": "auto",
+  "display": "inline",
 }
 
 FORMATTING_TAGS = ["b", "i", "em", "strong", "u", "s", "tt", "small", "big", "abbr"]
