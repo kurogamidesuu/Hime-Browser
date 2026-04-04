@@ -77,7 +77,16 @@ class CSSParser:
     return out
   
   def simple_selector(self):
-    out = TagSelector(self.word().casefold())
+    word = self.word().casefold()
+    if "." in word:
+      tag, class_name = word.split(".", 1)
+      if not tag:
+        out = ClassSelector(class_name)
+      else:
+        out = CompoundSelector(TagSelector(tag), ClassSelector(class_name))
+    else:
+      out = TagSelector(word)
+
     if self.i < len(self.s) and self.s[self.i] == ":":
       self.literal(":")
       pseudoclass = self.word().casefold()
@@ -142,6 +151,31 @@ class TagSelector:
 
   def matches(self, node):
     return isinstance(node, Element) and self.tag == node.tag
+
+class ClassSelector:
+  def __init__(self, class_name):
+    self.class_name = class_name
+    self.priority = 10
+
+  def matches(self, node):
+    if not isinstance(node, Element): return False
+    classes = node.attributes.get("class", "").split()
+    return self.class_name in classes
+
+  def __repr__(self):
+    return "ClassSelector({})".format(self.class_name)
+  
+class CompoundSelector:
+  def __init__(self, base, extension):
+    self.base = base
+    self.extension = extension
+    self.priority = base.prioriy + extension.priority
+
+  def matches(self, node):
+    return self.base.matches(node) and self.extension.matches(node)
+  
+  def __repr__(self):
+    return "CompoundSelector({}, {})".format(self.base, self.extension)
   
 class DescendantSelector:
   def __init__(self, ancestor, descendant):
