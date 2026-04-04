@@ -157,7 +157,7 @@ class HTMLParser:
     parent.children.append(node)
   
   def add_tag(self, tag):
-    if not tag.strip(): 
+    if not tag.strip():
       return
     
     tag, attributes = self.get_attributes(tag)

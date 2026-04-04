@@ -715,6 +715,15 @@ class Frame:
       body = body.decode("utf8", "replace")
       self.rules.extend(CSSParser(body).parse())
 
+    styles = [node
+              for node in tree_to_list(self.nodes, [])
+              if isinstance(node, Element)
+              and node.tag == "style"]
+    for style in styles:
+      for child in style.children:
+        if isinstance(child, Text):
+          self.rules.extend(CSSParser(child.text).parse())
+
     # images
     images = [node
               for node in tree_to_list(self.nodes, [])
