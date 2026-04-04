@@ -54,7 +54,12 @@ class CSSParser:
     while self.i < len(self.s) and self.s[self.i] != "}":
       try:
         prop, val = self.pair([";", "}"])
-        pairs[prop] = val
+        if prop == "font":
+          props_dict = expand_font_shorthand(val)
+          for prop, val in props_dict.items():
+            pairs[prop] = val
+        else:
+          pairs[prop] = val
         self.whitespace()
         self.literal(";")
         self.whitespace()
@@ -341,5 +346,28 @@ def init_style(node):
       [node.parent.style[property]] if node.parent and property in INHERITED_PROPERTIES else []))
     for property in CSS_PROPERTIES
   ])
+
+def expand_font_shorthand(val):
+  props = {}
+  font_family = []
+  tokens = val.split()
+  for token in tokens:
+    if token in ["italic", "oblique"]:
+      props["font-style"] = token
+    elif token == "normal":
+      if "font-style" not in props:
+        props["font-style"] = token
+      else:
+        props["font-weight"] = token
+    elif token == "bold" or token.isdigit():
+      props["font-weight"] = token
+    elif token.endswith("%") or token.endswith("px") or token.endswith("em"):
+      props["font-size"] = token
+    else:
+      font_family.append(token)
+
+  if font_family:
+    props["font-family"] = " ".join(font_family)
+  return props
 
 DEFAULT_STYLE_SHEET = CSSParser(open("browser.css").read()).parse()
