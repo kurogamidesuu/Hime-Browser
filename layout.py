@@ -276,6 +276,10 @@ class BlockLayout:
           else:
             if inline_siblings and all(is_inline(grandchild) for grandchild in child.children):
               inline_siblings.extend(child.children)
+              group_block = BlockLayout(inline_siblings, self, previous, self.frame)
+              children.append(group_block)
+              previous = group_block
+              inline_siblings = []
             else:
               if inline_siblings:
                 group_block = BlockLayout(inline_siblings, self, previous, self.frame)
