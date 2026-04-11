@@ -75,10 +75,13 @@ class CSSParser:
   def selector(self):
     out = self.simple_selector()
     self.whitespace()
+    selectors_list = [out]
     while self.i < len(self.s) and self.s[self.i] not in ["{", ","]:
       descendant = self.simple_selector()
-      out = DescendantSelector(out, descendant)
+      selectors_list.append(descendant)
       self.whitespace()
+
+    out = DescendantSelector(selectors_list)
     return out
   
   def simple_selector(self):
@@ -192,17 +195,30 @@ class CompoundSelector:
     return "CompoundSelector({}, {})".format(self.base, self.extension)
   
 class DescendantSelector:
-  def __init__(self, ancestor, descendant):
-    self.ancestor = ancestor
-    self.descendant = descendant
-    self.priority = ancestor.priority + descendant.priority
+  def __init__(self, selectors):
+    self.selectors = selectors
+    self.priority = sum(selector.priority for selector in selectors)
 
   def matches(self, node):
-    if not self.descendant.matches(node): return False
-    while node.parent:
-      if self.ancestor.matches(node.parent): return True
+    result = self._matches(node)
+    return result
+
+  def _matches(self, node):
+    i = len(self.selectors) - 1
+    curr = self.selectors[i]
+    while(node):
+      if curr.matches(node):
+        i = i - 1
+        if i < 0:
+          return True
+        curr = self.selectors[i]
       node = node.parent
+    if i == -1:
+      return True
     return False
+  
+  def __repr__(self):
+    return "DescendantSelector({})".format(self.selectors)
   
 class PseudoclassSelector:
   def __init__(self, pseudoclass, base):

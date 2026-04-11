@@ -657,7 +657,7 @@ class LineLayout:
     outline_node = None
     for child in self.children:
       child_outline = parse_outline(child.node.parent.style["outline"].get())
-      if child_outline:
+      if child_outline and hasattr(child, "self_rect"):
         outline_rect.join(child.self_rect())
         outline_node = child.node.parent
     if outline_node:
