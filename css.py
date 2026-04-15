@@ -86,12 +86,18 @@ class CSSParser:
   
   def simple_selector(self):
     word = self.word().casefold()
+    selectors = []
     if "." in word:
-      tag, class_name = word.split(".", 1)
-      if not tag:
-        out = ClassSelector(class_name)
+      parts = word.split(".")
+      if parts[0]:
+        selectors.append(TagSelector(parts[0]))
+      for cls in parts[1:]:
+        selectors.append(ClassSelector(cls))
+
+      if len(selectors) == 1:
+        out = selectors[0]
       else:
-        out = CompoundSelector(TagSelector(tag), ClassSelector(class_name))
+        out = SelectorSequence(selectors)
     else:
       out = TagSelector(word)
 
@@ -181,6 +187,14 @@ class ClassSelector:
 
   def __repr__(self):
     return "ClassSelector({})".format(self.class_name)
+  
+class SelectorSequence:
+  def __init__(self, selectors):
+    self.selectors = selectors
+    self.priority = sum(selector.priority for selector in selectors)
+
+  def matches(self, node):
+    return all(selector.matches(node) for selector in self.selectors)
   
 class CompoundSelector:
   def __init__(self, base, extension):
